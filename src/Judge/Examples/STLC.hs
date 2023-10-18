@@ -47,6 +47,12 @@ data HasType a = MkHasType a Type
 --   -------------- [T-Var]
 --   x : A |- x : A
 
+-- Necessitation rule:
+--
+--        |- t : A
+--   ----------------- [T-Necc]
+--     G |- t : box A
+
 -- Example:
 --
 --
