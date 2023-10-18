@@ -6,6 +6,7 @@ module Judge.Rule
 import Judge.Vec
 
 import Data.Foldable
+import Data.Stream.Infinite
 
 data Rule term j =
   MkRule (forall v. j v -> RuleResult term j v)
@@ -14,7 +15,13 @@ data Rule term j =
 
 -- Interpret a judgment as a Haskell function
 data Interpret term j =
-  MkInterpret (forall v. j v -> Rule term j)
+  MkInterpret (forall n. Hyp j n -> (Rule term j -> Rule term j)) -- TODO Try every rule as a parameter (the first Rule) when searching?
+
+
+
+-- | Deep embedding of a call to `search`. Used by hypothetical judgments
+data Search term j v =
+  MkSearch (j v -> Maybe (PartialAssignment term v))
 
 -- | Hypothetical judgment.
 --
@@ -23,28 +30,46 @@ data Interpret term j =
 -- represents
 --
 --     gamma |- J
-data Hyp j n a =
-  MkHyp (Vec n a -> j a)
+--
+-- TODO: Should this map proof trees (of the kind that `search` should
+-- generate) of some judgment to another judgment?
+--
+-- or maybe the arrow should be the other way around: It takes a judgment
+-- and it produces a list of required elements (judgments) of the context
+data Hyp j n =
+  MkHyp (forall v. Vec n v -> j v)
+
+data SomeHyp j =
+  MkSomeHyp (forall n. Sing n => Hyp j n)
 
 -- | "Non-hypothetical" judgment (has a context with nothing in it)
 type Simple j = Hyp j N0
 
 -- mkInterpret = mkInterpret
 
-search :: Eq (term v) => Interpret term j -> j v -> Maybe (PartialAssignment term v)
+-- Turn a hypothetical judgment into a simple one by using fresh variables
+-- for everything in the context
+withFreshVars :: Sing n => Stream v -> Hyp j n -> (j v, Stream v)
+withFreshVars freshVars (MkHyp f) =
+  let (vec, newFreshVars) = splittingStream freshVars
+  in
+  (f vec, newFreshVars)
+
+search :: Eq (term v) => Interpret term j -> Stream v -> j v -> Maybe (PartialAssignment term v)
 search (MkInterpret interp) = go
   where
-    go goal =
-      case interp goal of
-        MkRule rule ->
-          case rule goal of
-            VarAssign asn -> Just asn
-            NewGoals nextGoals -> mconcat (map go nextGoals)
+    go freshVars goal = undefined
+      -- case interp goal of
+      --   MkRule rule ->
+      --     case rule goal of
+      --       VarAssign asn -> Just asn
+      --       NewGoals nextGoals -> mconcat (map go nextGoals)
 
 -- | The immediate results of applying one rule
 data RuleResult term j v
   = NewGoals [j v] -- | Either we have a list of new goals to work on...
   | VarAssign (PartialAssignment term v) -- | ... or we have some partial assignment of terms to variables
+  | Failed
 
 newtype PartialAssignment term v =
   PartialAssignment (v -> AssignResult term v)

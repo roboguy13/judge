@@ -1,16 +1,26 @@
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE GADTs #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TypeApplications #-}
 
 -- | Length-indexed vectors, provided for convenience.
 
 module Judge.Vec
   where
 
+import Data.Stream.Infinite
+
 data Nat = Z | S Nat
 
 data NatS n where
   SingZ :: NatS 'Z
   SingS :: NatS n -> NatS ('S n)
+
+class Sing n where
+  sing :: NatS n
+
+instance Sing 'Z where sing = SingZ
+instance Sing n => Sing ('S n) where sing = SingS sing
 
 data Vec n a where
   Nil :: Vec 'Z a
@@ -19,6 +29,22 @@ data Vec n a where
 instance Functor (Vec n) where
   fmap f Nil = Nil
   fmap f (Cons x xs) = Cons (f x) (fmap f xs)
+
+fromStream :: forall n a. Sing n => Stream a -> Vec n a
+fromStream = fromStreamSing sing
+
+fromStreamSing :: forall n a. NatS n -> Stream a -> Vec n a
+fromStreamSing SingZ _ = Nil
+fromStreamSing (SingS p) (x :> xs) = Cons x (fromStreamSing p xs)
+
+splittingStream :: forall n a. Sing n => Stream a -> (Vec n a, Stream a)
+splittingStream = splittingStreamSing sing
+
+splittingStreamSing :: forall n a. NatS n -> Stream a -> (Vec n a, Stream a)
+splittingStreamSing SingZ rest = (Nil, rest)
+splittingStreamSing (SingS p) (x :> xs) =
+  case splittingStreamSing p xs of
+    (v, rest) -> (Cons x v, rest)
 
 type N0 = Z
 type N1 = S N0

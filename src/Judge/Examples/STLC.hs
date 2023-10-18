@@ -24,4 +24,34 @@ data Term a
 data HasType a = MkHasType a Type
 
 
+-- Hypothetical judgments get some judgments "for free" (we don't need to
+-- search for them)
+
+
+-- Lambda rule:
+--
+--    G, x : A |- t : B
+--  --------------------- [T-Lam]
+--   G |- \x. t : A -> B
+
+
+-- App rule:
+--
+--    G |- t : A -> B      G |- u : A
+--    ------------------------------- [T-App]
+--            G |- t u : B
+
+
+-- Var rule:
+--
+--   -------------- [T-Var]
+--   x : A |- x : A
+
+-- Example:
+--
+--
+--     -------------- [T-Var]
+--     x : A |- x : A
+--  --------------------- [T-Lam]
+--   |- \x. x : A -> A
 
