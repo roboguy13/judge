@@ -10,6 +10,8 @@ import Judge.Ppr
 
 import System.Console.Haskeline
 
+import Text.Megaparsec (eof)
+
 repl :: IO ()
 repl = replKB mempty
 
@@ -103,6 +105,11 @@ listExample =
       ["append(Cons(?x, ?xs), ?y, Cons(?x, ?r)) :-"
       ,"  append(?xs, ?y, ?r)."
       ]
+    ,"member(Cons(?x, ?xs), ?x)."
+    ,"member(Cons(?x, ?xs), ?y) :- member(?xs, ?y)."
+    -- ,"member(Nil, ?x, false)."
+    -- ,"member(Cons(?x, ?xs), ?x, true)."
+    -- ,"member(Cons(?x, ?xs), ?y, ?r) :- member(?xs, ?y, ?r)."
     ]
 
 -- TODO: Contexts and variable rule
@@ -117,7 +124,7 @@ simpleTypes =
     ]
 
 mkExample :: [String] -> [Rule V]
-mkExample = map (fromEither . parseEither parseDecl)
+mkExample = map (fromEither . parseEither (parseDecl <* eof))
   where
     fromEither (Left e) = error e
     fromEither (Right r) = r

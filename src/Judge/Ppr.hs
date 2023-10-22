@@ -20,8 +20,8 @@ class Ppr a where
 instance Ppr String where pprDoc = text
 
 instance (Ppr a, Ppr b) => Ppr (Either a b) where
-  pprDoc (Left x) = text "Left" <+> parens (pprDoc x)
-  pprDoc (Right y) = text "Right" <+> parens (pprDoc y)
+  pprDoc (Left x) = text "?" <.> pprDoc x
+  pprDoc (Right y) = pprDoc y
 
 (<.>) = (Text.PrettyPrint.HughesPJ.<>)
 

@@ -7,6 +7,8 @@
 module Judge.Logic.Unify
   where
 
+import Judge.Ppr
+
 import Data.Kind
 -- import Control.Lens.Plated
 import Data.Bifunctor
@@ -37,7 +39,7 @@ class Substitute (s :: Type -> Type) f | s -> f where
   mapSubstRhs :: (f a -> f a) -> s a -> s a
   mapMaybeSubst :: (a -> f a -> Maybe (b, f b)) -> s a -> s b
 
-type UnifyC s f a = (Eq a, Unify s f)
+type UnifyC s f a = (Ppr a, Eq a, Unify s f)
 
 applyDisjointSubst_Right :: (Substitute s f, Traversable f, Eq b) =>
   s (Either a b) -> f b -> f b
@@ -115,7 +117,7 @@ toDisjointSubst_Right = mapMaybeSubst toEither
     toEither :: a -> f a -> Maybe (Either b a, f (Either b a))
     toEither v x = Just (Right v, fmap Right x)
 
-extendSubst :: UnifyC s f a => s a -> a -> f a -> Maybe (s a)
+extendSubst :: (Ppr (f a), UnifyC s f a) => s a -> a -> f a -> Maybe (s a)
 extendSubst subst v x =
   case substLookup subst v of
     Nothing -> singleSubst v x `combineSubst` subst
@@ -129,21 +131,21 @@ combineSubsts xs = foldr combine (Just emptySubst) xs
       y <- maybeY
       combineSubst x y
 
-unify :: forall s f a. UnifyC s f a => f a -> f a -> Maybe (s a)
+unify :: forall s f a. (Ppr (f a), UnifyC s f a) => f a -> f a -> Maybe (s a)
 unify = unifySubst emptySubst
 
-unifySubstDisjoint :: forall s f a b. (UnifyC s f a, UnifyC s f b, Monad f, Functor s, Traversable f) =>
+unifySubstDisjoint :: forall s f a b. (Ppr (f (Either b a)), UnifyC s f a, UnifyC s f b, Monad f, Functor s, Traversable f) =>
   s a -> f a -> f b -> Maybe (s a)
 unifySubstDisjoint subst x y = do
     subst' <- unifySubstDisjoint' (toDisjointSubst_Right subst) x y
     pure $ simplifyDisjointSubst subst subst'
 
-unifySubstDisjoint' :: forall s f a b. (UnifyC s f a, UnifyC s f b, Functor f) =>
+unifySubstDisjoint' :: forall s f a b. (Ppr (f (Either b a)), UnifyC s f a, UnifyC s f b, Functor f) =>
   s (Either b a) -> f a -> f b -> Maybe (s (Either b a))
 unifySubstDisjoint' subst x y = unifySubst subst (fmap Right x) (fmap Left y)
 
 
-unifySubst :: forall s f a. UnifyC s f a => s a -> f a -> f a -> Maybe (s a)
+unifySubst :: forall s f a. (Ppr (f a), UnifyC s f a) => s a -> f a -> f a -> Maybe (s a)
 unifySubst subst x y
   | Just xC <- getConst @s @f x, Just yC <- getConst @s @f y =
       if xC == yC
@@ -155,13 +157,20 @@ unifySubst subst x y
   | Just yV <- getVar @s @f y = unifyVar subst yV x
 
   | Just paired <- matchOne @s @f x y =
-      combineSubsts =<< traverse (uncurry (unifySubst subst)) paired
+      unifyList subst paired
 
   | otherwise = Nothing
 
-unifyVar :: forall s f a. UnifyC s f a => s a -> a -> f a -> Maybe (s a)
+unifyList :: forall s f a. (Ppr (f a), UnifyC s f a) => s a -> [(f a, f a)] -> Maybe (s a)
+unifyList subst [] = Just subst
+unifyList subst ((x, y) : rest) = do
+  subst' <- unifySubst subst x y
+  unifyList subst' rest
+
+unifyVar :: forall s f a. (Ppr (f a), UnifyC s f a) => s a -> a -> f a -> Maybe (s a)
 unifyVar subst xV y
   | Just yV <- getVar @s @f y, Just yInst <- substLookup subst yV =
+      trace ("unify " ++ ppr xV ++ " and " ++ ppr yInst) $
       unifySubst @s @f subst (mkVar @s @f xV) yInst
       -- newSubst <- unifySubst @s @f subst (mkVar @s @f xV) yInst
       -- extendSubst newSubst yV (mkVar xV)
