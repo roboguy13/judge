@@ -1,13 +1,16 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Judge.Logic.Logic
   where
 
 import Judge.Logic.Unify
+import Judge.Ppr
 
 import Data.Maybe
+import Data.List
 
 data LTerm a
   = Var a
@@ -26,6 +29,30 @@ ruleBody (_ :- ys) = ys
 
 fact :: LTerm a -> Rule a
 fact x = x :- []
+
+type Query = LTerm
+
+fromApp :: (LTerm a, LTerm a) -> (LTerm a, [LTerm a])
+fromApp ((App x y), z) =
+  let (f, args) = fromApp (x, y)
+  in
+  (f, args ++ [z])
+fromApp (x, y) = (x, [y])
+
+instance Ppr a => Ppr (LTerm a) where
+  pprDoc (Var v) = pprDoc v
+  pprDoc (Const x) = pprDoc x
+  pprDoc (App x y) =
+    let (f, args) = fromApp (x, y)
+    in
+    pprDoc f <.> parens (foldr (<+>) mempty (punctuate (text ",") (map pprDoc args)))
+
+instance Ppr a => Ppr (Rule a) where
+  pprDoc (hd :- []) = pprDoc hd <.> text "."
+  pprDoc (hd :- body) = pprDoc hd <+> text ":-" <+> pprDoc body <.> text "."
+
+instance Ppr a => Ppr [LTerm a] where
+  pprDoc = foldr (<+>) mempty . punctuate (text ",") . map pprDoc
 
 data Subst f a = Subst [(a, f a)]
   deriving (Show)
@@ -85,6 +112,9 @@ querySubstAll subst rules (x:xs) = do
 
 data V = V String
   deriving (Show, Eq)
+
+instance Ppr V where
+  pprDoc (V x) = text "?" <.> pprDoc x
 
 testKB :: [Rule V]
 testKB =
