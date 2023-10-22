@@ -78,7 +78,7 @@ parseRule = lexeme $ do
   pure (hd :- body)
 
 parseDecl :: Parser (Rule V)
-parseDecl = parseFact <|> parseRule
+parseDecl = try parseFact <|> parseRule
 
 parseQuery :: Parser (Query V)
 parseQuery = parseApp `sepBy1` symbol ","
