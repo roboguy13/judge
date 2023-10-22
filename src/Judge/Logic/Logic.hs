@@ -7,6 +7,7 @@ module Judge.Logic.Logic
   where
 
 import Judge.Logic.Unify
+import Judge.Logic.Name
 import Judge.Ppr
 
 import Data.Maybe
@@ -21,7 +22,7 @@ data LTerm a
   = Var a
   | Const String
   | App (LTerm a) (LTerm a)
-  deriving (Show, Eq, Foldable, Functor)
+  deriving (Show, Eq, Foldable, Traversable, Functor)
 
 instance Applicative LTerm where
   pure = Var
@@ -168,29 +169,27 @@ mkQueryResultAll f goal =
   , queryResultSubsts = f goal
   }
 
-query :: QueryC a => [Rule a] -> LTerm a -> QueryResult a
-query = mkQueryResult . querySubst emptySubst
+query :: QueryC a => [Rule (Name a)] -> LTerm a -> QueryResult a
+query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 
-queryAll :: QueryC a => [Rule a] -> [LTerm a] -> QueryResult a
-queryAll = mkQueryResultAll . querySubstAll emptySubst
+queryAll :: QueryC a => [Rule (Name a)] -> [LTerm a] -> QueryResult a
+queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
 
-querySubst :: QueryC a => Subst LTerm a -> [Rule a] -> LTerm a -> [Subst LTerm a]
+querySubst :: (QueryC a, QueryC b) => Subst LTerm (Either (Name a) b) -> [Rule (Name a)] -> LTerm b -> [Subst LTerm (Either (Name a) b)]
 querySubst subst rules goal = do
-  rule0 <- rules
-
-  let rule = freshenRule (getVars goal) rule0
+  rule <- rules
 
   newSubst <-
     -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule)
-    maybeToList $ unifySubst subst goal (ruleHead rule)
+    maybeToList $ unifySubstDisjoint' subst goal (ruleHead rule)
 
   case
       -- trace ("*** using subst " ++ ppr newSubst) $
-      map (applySubst newSubst) (ruleBody rule) of
+      map (applyDisjointSubst_Left subst) (ruleBody rule) of
     [] -> pure newSubst
-    newGoals -> querySubstAll newSubst rules newGoals
+    newGoals -> let r = querySubstAll newSubst rules (map _ newGoals) in undefined
 
-querySubstAll :: QueryC a => Subst LTerm a -> [Rule a] -> [LTerm a] -> [Subst LTerm a]
+querySubstAll :: (QueryC a, QueryC b) => Subst LTerm (Either (Name a) b) -> [Rule (Name a)] -> [LTerm b] -> [Subst LTerm (Either (Name a) b)]
 querySubstAll subst rules [] = pure subst
 querySubstAll subst rules (x:xs) = do
   newSubst <- querySubst subst rules x
@@ -199,29 +198,29 @@ querySubstAll subst rules (x:xs) = do
 class VarC a where
   varSucc :: a -> a
 
-freshenRule :: forall f a. (VarC a, Eq a) => [a] -> Rule a -> Rule a
-freshenRule usedVars (x :- xs) = freshen usedVars x :- map (freshen usedVars) xs
-
-freshen :: forall f a. (Unify (Subst f) f, Substitute (Subst f) f, VarC a, Eq a, Foldable f) => [a] -> f a -> f a
-freshen usedVars t =
-  let vars = toList t
-      subst = go vars
-  in
-  applySubst subst t
-  where
-    go :: [a] -> Subst f a
-    go [] = Subst []
-    go (v:vs)
-      | v `elem` usedVars =
-          let Just r = goVar v v `combineSubst` go vs
-          in
-          r
-      | otherwise         = go vs
-
-    goVar :: a -> a -> Subst f a
-    goVar origV v
-      | v `elem` usedVars = goVar origV $ varSucc v
-      | otherwise         = singleSubst origV (mkVar v)
+-- freshenRule :: forall f a. (VarC a, Eq a) => [a] -> Rule a -> Rule a
+-- freshenRule usedVars (x :- xs) = freshen usedVars x :- map (freshen usedVars) xs
+--
+-- freshen :: forall f a. (Unify (Subst f) f, Substitute (Subst f) f, VarC a, Eq a, Foldable f) => [a] -> f a -> f a
+-- freshen usedVars t =
+--   let vars = toList t
+--       subst = go vars
+--   in
+--   applySubst subst t
+--   where
+--     go :: [a] -> Subst f a
+--     go [] = Subst []
+--     go (v:vs)
+--       | v `elem` usedVars =
+--           let Just r = goVar v v `combineSubst` go vs
+--           in
+--           r
+--       | otherwise         = go vs
+--
+--     goVar :: a -> a -> Subst f a
+--     goVar origV v
+--       | v `elem` usedVars = goVar origV $ varSucc v
+--       | otherwise         = singleSubst origV (mkVar v)
 
 data V = V String
   deriving (Show, Eq)

@@ -9,6 +9,7 @@ module Judge.Logic.Unify
 
 import Data.Kind
 -- import Control.Lens.Plated
+import Data.Bifunctor
 
 import Debug.Trace
 
@@ -34,8 +35,20 @@ class Substitute (s :: Type -> Type) f | s -> f where
   emptySubst :: s a
   substLookup :: Eq a => s a -> a -> Maybe (f a)
   mapSubstRhs :: (f a -> f a) -> s a -> s a
+  mapMaybeSubst :: (a -> f a -> Maybe (b, f b)) -> s a -> s b
 
 type UnifyC s f a = (Eq a, Unify s f)
+
+applyDisjointSubst_Right :: (Substitute s f, Traversable f, Eq b) =>
+  s (Either a b) -> f b -> f b
+applyDisjointSubst_Right subst =
+  applySubst (fromDisjointSubst_Right subst)
+
+applyDisjointSubst_Left :: (Substitute s f, Traversable f, Eq a) =>
+  s (Either a b) -> f a -> f a
+applyDisjointSubst_Left subst =
+  applySubst (fromDisjointSubst_Right (disjointSubstSwap subst))
+
 
 -- TODO: Be careful to not get stuck in a loop when two variables are
 -- "equal" to each other in the substitution?
@@ -53,10 +66,6 @@ applySubstRec subst x =
 simplifySubst :: (Eq a, Unify s f, Monad f) => s a -> s a -> s a
 simplifySubst subst1 subst2 =
   mapSubstRhs (>>= simplifyVar subst2) subst1
-  -- where
-  --   go x
-  --     | Just v <- getVar x = simplifyVar subst2 v
-  --     | otherwise          = x
 
 simplifyVar :: (Eq a, Unify s f) => s a -> a -> f a
 simplifyVar subst v =
@@ -66,8 +75,46 @@ simplifyVar subst v =
       | Just v' <- getVar r -> simplifyVar subst v'
       | otherwise           -> r
 
+simplifyDisjointSubst :: forall s f a b. (Unify s f, Eq a, Eq b, Monad f, Traversable f) =>
+  s a -> s (Either b a) -> s a
+simplifyDisjointSubst subst1 subst2 =
+  let subst1' :: s (Either b a)
+      subst1' = toDisjointSubst_Right subst1
+
+      subst' = simplifySubst subst1'
+  in
+  fromDisjointSubst_Right $ simplifySubst subst1' subst2
+
+fromDisjointSubst_Right :: forall s f a b. (Substitute s f, Traversable f) =>
+  s (Either b a) -> s a
+fromDisjointSubst_Right = mapMaybeSubst fromEither
+  where
+    fromEither :: Either b a -> f (Either b a) -> Maybe (a, f a)
+    fromEither (Right v) x =
+      case sequenceA x of
+        Right x' -> Just (v, x')
+        Left _ -> Nothing
+    fromEither _ _ = Nothing
+
+disjointSubstSwap :: (Substitute s f, Functor f) =>
+  s (Either a b) -> s (Either b a)
+disjointSubstSwap = mapMaybeSubst go
+  where
+    go x y = Just (eitherSwap x, fmap eitherSwap y)
+
+eitherSwap :: Either a b -> Either b a
+eitherSwap (Left x) = Right x
+eitherSwap (Right y) = Left y
+
+toDisjointSubst_Right :: forall s f a b. (Functor f, Substitute s f) =>
+  s a -> s (Either b a)
+toDisjointSubst_Right = mapMaybeSubst toEither
+  where
+    toEither :: a -> f a -> Maybe (Either b a, f (Either b a))
+    toEither v x = Just (Right v, fmap Right x)
+
 extendSubst :: UnifyC s f a => s a -> a -> f a -> Maybe (s a)
-extendSubst subst v x = --singleSubst v x `combineSubst` subst
+extendSubst subst v x =
   case substLookup subst v of
     Nothing -> singleSubst v x `combineSubst` subst
     Just y -> unifySubst subst x y
@@ -82,6 +129,17 @@ combineSubsts xs = foldr combine (Just emptySubst) xs
 
 unify :: forall s f a. UnifyC s f a => f a -> f a -> Maybe (s a)
 unify = unifySubst emptySubst
+
+unifySubstDisjoint :: forall s f a b. (UnifyC s f a, UnifyC s f b, Monad f, Functor s, Traversable f) =>
+  s a -> f a -> f b -> Maybe (s a)
+unifySubstDisjoint subst x y = do
+    subst' <- unifySubstDisjoint' (toDisjointSubst_Right subst) x y
+    pure $ simplifyDisjointSubst subst subst'
+
+unifySubstDisjoint' :: forall s f a b. (UnifyC s f a, UnifyC s f b, Functor f) =>
+  s (Either b a) -> f a -> f b -> Maybe (s (Either b a))
+unifySubstDisjoint' subst x y = unifySubst subst (fmap Right x) (fmap Left y)
+
 
 unifySubst :: forall s f a. UnifyC s f a => s a -> f a -> f a -> Maybe (s a)
 unifySubst subst x y
