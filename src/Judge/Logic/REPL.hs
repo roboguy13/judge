@@ -105,11 +105,11 @@ listExample =
       ["append(Cons(?x, ?xs), ?y, Cons(?x, ?r)) :-"
       ,"  append(?xs, ?y, ?r)."
       ]
-    ,"member(Cons(?x, ?xs), ?x)."
-    ,"member(Cons(?x, ?xs), ?y) :- member(?xs, ?y)."
-    -- ,"member(Nil, ?x, false)."
-    -- ,"member(Cons(?x, ?xs), ?x, true)."
-    -- ,"member(Cons(?x, ?xs), ?y, ?r) :- member(?xs, ?y, ?r)."
+    -- ,"member(Cons(?x, ?xs), ?x)."
+    -- ,"member(Cons(?x, ?xs), ?y) :- member(?xs, ?y)."
+    ,"member(Nil, ?x, false)."
+    ,"member(Cons(?x, ?xs), ?x, true)."
+    ,"member(Cons(?x, ?xs), ?y, ?r) :- member(?xs, ?y, ?r)."
     ]
 
 -- TODO: Contexts and variable rule
