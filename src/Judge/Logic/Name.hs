@@ -5,12 +5,12 @@ import Judge.Ppr
 
 import Data.Bifunctor
 
--- De Bruijn levels
+-- Names with uniques
 
-data Name a = Name a Int
+data Name a = Name a Int deriving (Show, Eq)
 
-instance Eq (Name a) where
-  Name _ i == Name _ j = i == j
+-- instance Eq (Name a) where
+--   Name _ i == Name _ j = i == j
 
 -- instance Ord (Name a) where
 --   compare (Name _ i) (Name _ j) = compare i j

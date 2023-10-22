@@ -23,7 +23,9 @@ replKB rules = runInputT defaultSettings loop
           case parseEither parseQuery line of
             Left e -> outputStrLn e *> loop
             Right queryIn -> do
-              outputAnswer $ queryDisplaySubsts $ queryAll (map toDebruijnRule rules) queryIn
+              let answer = queryAll (map toDebruijnRule rules) queryIn
+              -- outputStrLn $ show answer
+              outputAnswer $ queryDisplaySubsts answer
               loop
 
 outputAnswer :: (Eq a, Eq (f a), Ppr a, Ppr (f a)) => [Subst f a] -> InputT IO ()

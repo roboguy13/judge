@@ -57,7 +57,9 @@ applySubstRec subst x =
   let y = applySubst subst x
   in
   case getVar y of
-    Just _ -> applySubstRec subst y
+    Just yV
+      | Just xV <- getVar x, yV == xV -> y
+      | otherwise -> applySubstRec subst y
     Nothing -> y
 
 -- Use the variables from the first Subst in the result and
