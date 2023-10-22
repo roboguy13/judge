@@ -27,14 +27,18 @@ shift (Name x i) = Name x (succ i)
 class VarC a where
   varSucc :: a -> a
   updateIx :: a -> Int -> a
+  fromDisjointName :: Either (Name a) a -> a
 
 instance VarC (Name a) where
   varSucc (Name x i) = Name x (succ i)
   updateIx (Name x _) i = Name x i
+  fromDisjointName (Left (Name x _)) = x
+  fromDisjointName (Right y) = y
 
 instance (VarC a, VarC b) => VarC (Either a b) where
   varSucc = bimap varSucc varSucc
   updateIx v i = bimap (`updateIx` i) (`updateIx` i) v
+  fromDisjointName = error "fromDisjointName Either" --bimap fromDisjointName fromDisjointName
 
 newtype FreshT m a = FreshT (StateT Int m a)
   deriving (Functor, Applicative, Monad, MonadState Int, MonadTrans)

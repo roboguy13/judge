@@ -159,13 +159,16 @@ data QueryResult a =
 
 -- | Display the resulting `Subst`s in terms of the variables from the
 -- original query:
-queryDisplaySubsts :: forall a b. Eq a => QueryResult a -> [Subst LTerm a]
+queryDisplaySubsts :: forall a b. (VarC a, Eq a) => QueryResult a -> [Subst LTerm a]
 queryDisplaySubsts qr =
     let results = queryResultSubsts qr
         initialResultSubst = map mkTheSubst results
     in
-    rights $ map sequenceA $ zipWith simplifySubst initialResultSubst results
+    map (fmap fromDisjointName) $ zipWith simplifySubst initialResultSubst results
   where
+    toV (Left x) = UnifyV x
+    toV (Right y) = V y
+
     mkTheSubst subst = Subst $ map go $ queryOrigVars qr
       where
         -- go :: a -> (a, LTerm a)
@@ -284,15 +287,24 @@ freshenSubst initialSubst t = do
     --   | v `elem` usedVars = goVar origV <$> fresh v
     --   | otherwise         = singleSubst origV (mkVar v)
 
-data V = V String
+data V = V String | UnifyV (Name String)
   deriving (Show, Eq)
 
 instance Ppr V where
   pprDoc (V x) = text "?" <.> pprDoc x
+  pprDoc (UnifyV x) = text "??" <.> pprDoc x 
 
 instance VarC V where
   varSucc (V x) = V $ x <> "_"
-  updateIx x _ = x
+
+  updateIx (UnifyV x) i = UnifyV $ updateIx x i
+  updateIx (V x) _ = V x
+
+  fromDisjointName (Left (Name x i)) = toUnify x
+    where
+      toUnify (V y) = UnifyV (Name y i)
+      toUnify (UnifyV (Name y _)) = UnifyV (Name y i)
+  fromDisjointName (Right y) = y
 
 testKB :: [Rule V]
 testKB =

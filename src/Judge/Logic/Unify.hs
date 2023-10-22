@@ -16,7 +16,7 @@ import Data.Bifunctor
 import Debug.Trace
 
 doOccursCheck :: Bool
-doOccursCheck = False
+doOccursCheck = True
 
 data UnifyVar a = UnifyVar (Maybe a) Int
 

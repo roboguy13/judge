@@ -26,7 +26,7 @@ replKB rules = runInputT defaultSettings loop
             Left e -> outputStrLn e *> loop
             Right queryIn -> do
               let answer = queryAll (map toDebruijnRule rules) queryIn
-              -- outputStrLn $ show answer
+              outputStrLn $ show answer
               outputAnswer $ queryDisplaySubsts answer
               loop
 
