@@ -15,7 +15,7 @@ import Text.Megaparsec (eof)
 repl :: IO ()
 repl = replKB mempty
 
-replKB :: [Rule V] -> IO ()
+replKB :: [Rule LTerm V] -> IO ()
 replKB rules = runInputT defaultSettings loop
   where
     loop = do
@@ -26,7 +26,7 @@ replKB rules = runInputT defaultSettings loop
             Left e -> outputStrLn e *> loop
             Right queryIn -> do
               let answer = queryAll (map toDebruijnRule rules) queryIn
-              outputStrLn $ show answer
+              -- outputStrLn $ show answer
               outputAnswer $ queryDisplaySubsts answer
               loop
 
@@ -42,7 +42,7 @@ outputAnswer xs0 = loop xs0
         Just '.' -> pure ()
         _ -> pure ()
 
-kb2 :: [Rule V]
+kb2 :: [Rule LTerm V]
 kb2 =
   mkExample
     ["happy(yolanda)."
@@ -52,7 +52,7 @@ kb2 =
     ,"playsAirGuitar(yolanda) :- listens2Music(yolanda)."
     ]
 
-kb3 :: [Rule V]
+kb3 :: [Rule LTerm V]
 kb3 =
   mkExample
     ["happy(vincent)."
@@ -72,7 +72,7 @@ kb3 =
      ]
     ]
 
-kb4 :: [Rule V]
+kb4 :: [Rule LTerm V]
 kb4 =
   mkExample
     ["woman(mia)."
@@ -85,7 +85,7 @@ kb4 =
     ,"loves(honey_bunny, pumpkin)."
     ]
 
-kb5 :: [Rule V]
+kb5 :: [Rule LTerm V]
 kb5 =
   mkExample
     ["loves(vincent,mia)."
@@ -97,7 +97,7 @@ kb5 =
     ]
 
 -- append(Cons(c, Nil), Cons(d, Cons(e, Nil)), Cons(?x, ?r)).
-listExample :: [Rule V]
+listExample :: [Rule LTerm V]
 listExample =
   mkExample
     ["append(Nil, ?y, ?y)."
@@ -115,7 +115,7 @@ listExample =
     ]
 
 -- TODO: Contexts and variable rule
-simpleTypes :: [Rule V]
+simpleTypes :: [Rule LTerm V]
 simpleTypes =
   mkExample
     ["lookup(extend(?ctx, ?x, ?a), ?x, ?a)."
@@ -144,7 +144,7 @@ simpleTypes =
       ]
     ]
 
-mkExample :: [String] -> [Rule V]
+mkExample :: [String] -> [Rule LTerm V]
 mkExample = map (fromEither . parseEither (parseDecl <* eof))
   where
     fromEither (Left e) = error e

@@ -62,13 +62,13 @@ parseApp1 = lexeme $ do
 parseApp :: Parser (LTerm V)
 parseApp = try parseApp1 <|> fmap Const parseIdent
 
-parseFact :: Parser (Rule V)
+parseFact :: Parser (Rule LTerm V)
 parseFact = lexeme $ do
   hd <- parseApp
   symbol "."
   pure (hd :- [])
 
-parseRule :: Parser (Rule V)
+parseRule :: Parser (Rule LTerm V)
 parseRule = lexeme $ do
   hd <- parseApp
   symbol ":-"
@@ -77,7 +77,7 @@ parseRule = lexeme $ do
 
   pure (hd :- body)
 
-parseDecl :: Parser (Rule V)
+parseDecl :: Parser (Rule LTerm V)
 parseDecl = try parseFact <|> parseRule
 
 parseQuery :: Parser (Query V)

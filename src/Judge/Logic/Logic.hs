@@ -2,6 +2,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
 
 module Judge.Logic.Logic
   where
@@ -38,10 +39,10 @@ instance Monad LTerm where
   Const s >>= _ = Const s
   App x y >>= f = App (x >>= f) (y >>= f)
 
-data Rule a = LTerm a :- [LTerm a]
+data Rule f a = f a :- [f a]
   deriving (Show, Foldable, Functor)
 
-toDebruijnRule :: forall a. (Show a, Eq a) => Rule a -> Rule (Name a)
+toDebruijnRule :: forall f a. (Functor f, Foldable f, Show a, Eq a) => Rule f a -> Rule f (Name a)
 toDebruijnRule rule@(hd :- body) =
   let vars = nub $ toList rule
 
@@ -51,7 +52,7 @@ toDebruijnRule rule@(hd :- body) =
   renameTerm renaming hd :- map (renameTerm renaming) body
 
   where
-    renameTerm :: (Show x, Eq x) => [(x, y)] -> LTerm x -> LTerm y
+    renameTerm :: (Show x, Eq x) => [(x, y)] -> f x -> f y
     renameTerm = fmap . rename
 
     rename :: (Show x, Eq x) => [(x, y)] -> x -> y
@@ -60,13 +61,13 @@ toDebruijnRule rule@(hd :- body) =
         Just v' -> v'
         _ -> error $ "toDebruijnRule.rename: cannot find name " ++ show v
 
-ruleHead :: Rule a -> LTerm a
+ruleHead :: Rule f a -> f a
 ruleHead (x :- _) = x
 
-ruleBody :: Rule a -> [LTerm a]
+ruleBody :: Rule f a -> [f a]
 ruleBody (_ :- ys) = ys
 
-fact :: LTerm a -> Rule a
+fact :: f a -> Rule f a
 fact x = x :- []
 
 getVars :: LTerm a -> [a]
@@ -89,7 +90,7 @@ instance Ppr a => Ppr (LTerm a) where
     in
     pprDoc f <.> parens (foldr (<+>) mempty (punctuate (text ",") (map pprDoc args)))
 
-instance Ppr a => Ppr (Rule a) where
+instance (Ppr (f a), Ppr [f a]) => Ppr (Rule f a) where
   pprDoc (hd :- []) = pprDoc hd <.> text "."
   pprDoc (hd :- body) = pprDoc hd <+> text ":-" <+> pprDoc body <.> text "."
 
@@ -150,16 +151,18 @@ instance Substitute (Subst LTerm) LTerm where
   mapSubstRhs f (Subst xs) = Subst (map (fmap f) xs)
   mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 
-data QueryResult a =
+data QueryResult f a =
   QueryResult
   { queryOrigVars :: [a]
-  , queryResultSubsts :: [Subst LTerm (Either (Name a) a)]
+  , queryResultSubsts :: [Subst f (Either (Name a) a)]
   }
-  deriving (Show)
+  -- deriving (Show)
+
+deriving instance (Show a, Show (f (Either (Name a) a))) => Show (QueryResult f a)
 
 -- | Display the resulting `Subst`s in terms of the variables from the
 -- original query:
-queryDisplaySubsts :: forall a b. (VarC a, Eq a) => QueryResult a -> [Subst LTerm a]
+queryDisplaySubsts :: forall f a b. (VarC a, Eq a, Unify (Subst f) f, Monad f) => QueryResult f a -> [Subst f a]
 queryDisplaySubsts qr =
     let results = queryResultSubsts qr
         initialResultSubst = map mkTheSubst results
@@ -171,21 +174,10 @@ queryDisplaySubsts qr =
 
     mkTheSubst subst = Subst $ map go $ queryOrigVars qr
       where
-        -- go :: a -> (a, LTerm a)
-        go :: a -> (Either (Name a) a, LTerm (Either (Name a) a))
-        go x = (Right x, applySubstRec subst (Var (Right x))) --(x, applySubstRec subst (Var (Right x)))
-  --   let resultsRights :: [Subst LTerm a]
-  --       resultsRights = rights $ _ (queryResultSubsts qr)
-  --       initialResultSubst = map mkTheSubst resultsRights
-  --   in
-  --   zipWith simplifySubst initialResultSubst resultsRights
-  -- where
-  --   mkTheSubst subst = Subst $ map (undefined go) $ queryOrigVars qr
-  --     where
-  --       go :: a -> (a, LTerm a)
-  --       go x = (x, applySubstRec subst (Var x))
+        go :: a -> (Either (Name a) a, f (Either (Name a) a))
+        go x = (Right x, applySubstRec subst (mkVar (Right x))) --(x, applySubstRec subst (Var (Right x)))
 
--- instance (Eq a, Ppr a) => Ppr (QueryResult a) where
+-- instance (Eq a, Ppr a) => Ppr (QueryResult f a) where
 --   pprDoc qr =
 --       -- Display the resulting `Subst`s in terms of the variables from the
 --       -- original query:
@@ -193,39 +185,39 @@ queryDisplaySubsts qr =
 --     where
 --       mkTheSubst subst = Subst $ map go $ queryOrigVars qr
 --         where
---           go :: a -> (a, LTerm a)
---           go x = (x, applySubst subst (Var x))
+--           go :: a -> (a, f a)
+--           go x = (x, applySubst subst (mkVar x))
 
-type QueryC a = (Ppr a, Eq a, VarC a)
+type QueryC f a = (Ppr a, Eq a, VarC a, Unify (Subst f) f, Ppr (f a), Foldable f, Applicative f)
 
-mkQueryResult :: (LTerm a -> [Subst LTerm (Either (Name a) a)]) -> (LTerm a -> QueryResult a)
+mkQueryResult :: Foldable f => (f a -> [Subst f (Either (Name a) a)]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
   QueryResult
-  { queryOrigVars = getVars goal
+  { queryOrigVars = toList goal
   , queryResultSubsts = f goal
   }
 
-mkQueryResultAll :: ([LTerm a] -> [Subst LTerm (Either (Name a) a)]) -> ([LTerm a] -> QueryResult a)
+mkQueryResultAll :: Foldable f => ([f a] -> [Subst f (Either (Name a) a)]) -> ([f a] -> QueryResult f a)
 mkQueryResultAll f goal =
   QueryResult
-  { queryOrigVars = concatMap getVars goal
+  { queryOrigVars = concatMap toList goal
   , queryResultSubsts = f goal
   }
 
-query :: QueryC a => [Rule (Name a)] -> LTerm a -> QueryResult a
+query :: (QueryC f a, Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 query rules =
   mkQueryResult $ \goal ->
       runFreshT (querySubst emptySubst (map (fmap Left) rules) (fmap Right goal))
 
 
-queryAll :: (QueryC a) => [Rule (Name a)] -> [LTerm a] -> QueryResult a
+queryAll :: (QueryC f a, Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
 -- queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
 queryAll rules =
   mkQueryResultAll $ \goal ->
       runFreshT (querySubstAll emptySubst (map (fmap Left) rules) (map (fmap Right) goal))
 
-querySubst :: (QueryC a) => Subst LTerm a -> [Rule a] -> LTerm a -> FreshT [] (Subst LTerm a)
+querySubst :: (QueryC f a) => Subst f a -> [Rule f a] -> f a -> FreshT [] (Subst f a)
 querySubst subst rules goal = do
   rule0 <- lift rules
 
@@ -241,13 +233,13 @@ querySubst subst rules goal = do
     [] -> pure newSubst
     newGoals -> querySubstAll newSubst rules newGoals
 
-querySubstAll :: (QueryC a) => Subst LTerm a -> [Rule a] -> [LTerm a] -> FreshT [] (Subst LTerm a)
+querySubstAll :: (QueryC f a) => Subst f a -> [Rule f a] -> [f a] -> FreshT [] (Subst f a)
 querySubstAll subst rules [] = pure subst
 querySubstAll subst rules (x:xs) = do
   newSubst <- querySubst subst rules x
   querySubstAll newSubst rules xs
 
-freshenRule :: forall m f a. (Monad m, VarC a, Eq a) => Rule a -> FreshT m (Rule a)
+freshenRule :: forall m f a. (Foldable f, Unify (Subst f) f, Applicative f, Monad m, VarC a, Eq a) => Rule f a -> FreshT m (Rule f a)
 freshenRule (x :- xs) = do
   subst <- freshenSubsts emptySubst (x : xs)
   pure $ applySubst subst x :- map (applySubst subst) xs
@@ -275,7 +267,7 @@ freshenSubst initialSubst t = do
       vs' <- go vs
       let Just r = v' `combineSubst` vs'
       pure r
-  
+
     goVar :: a -> FreshT m (Subst f a)
     goVar v = do
       v' <- fresh v
@@ -305,22 +297,22 @@ instance VarC V where
       toUnify (V y) = UnifyV (Name y i)
       toUnify (UnifyV (Name y _)) = UnifyV (Name y i)
   fromDisjointName (Right y) = y
-
-testKB :: [Rule V]
-testKB =
-  [fact $ App (Const "f") (Const "a")
-  ,fact $ App (Const "f") (Const "b")
-
-  ,fact $ App (Const "g") (Const "a")
-  ,fact $ App (Const "g") (Const "b")
-
-  ,fact $ App (Const "h") (Const "b")
-
-  ,App (Const "k") (Var (V "X"))
-      :-
-    [App (Const "f") (Var (V "X"))
-    ,App (Const "g") (Var (V "X"))
-    ,App (Const "h") (Var (V "X"))
-    ]
-  ]
-
+--
+-- testKB :: [Rule V]
+-- testKB =
+--   [fact $ App (Const "f") (Const "a")
+--   ,fact $ App (Const "f") (Const "b")
+--
+--   ,fact $ App (Const "g") (Const "a")
+--   ,fact $ App (Const "g") (Const "b")
+--
+--   ,fact $ App (Const "h") (Const "b")
+--
+--   ,App (Const "k") (Var (V "X"))
+--       :-
+--     [App (Const "f") (Var (V "X"))
+--     ,App (Const "g") (Var (V "X"))
+--     ,App (Const "h") (Var (V "X"))
+--     ]
+--   ]
+--
