@@ -105,21 +105,42 @@ listExample =
       ["append(Cons(?x, ?xs), ?y, Cons(?x, ?r)) :-"
       ,"  append(?xs, ?y, ?r)."
       ]
-    -- ,"member(Cons(?x, ?xs), ?x)."
-    -- ,"member(Cons(?x, ?xs), ?y) :- member(?xs, ?y)."
-    ,"member(Nil, ?x, false)."
-    ,"member(Cons(?x, ?xs), ?x, true)."
-    ,"member(Cons(?x, ?xs), ?y, ?r) :- member(?xs, ?y, ?r)."
+
+    ,"member(Cons(?x, ?xs), ?x)."
+    ,"member(Cons(?x, ?xs), ?y) :- member(?xs, ?y)."
+
+    ,"memberBool(Nil, ?x, false)."
+    ,"memberBool(Cons(?x, ?xs), ?x, true)."
+    ,"memberBool(Cons(?x, ?xs), ?y, ?r) :- memberBool(?xs, ?y, ?r)."
     ]
 
 -- TODO: Contexts and variable rule
 simpleTypes :: [Rule V]
 simpleTypes =
   mkExample
-    [unlines
-      ["hasType(?ctx, app(?f, ?x), arr(?a, ?b)) :-"
+    ["lookup(extend(?ctx, ?x, ?a), ?x, ?a)."
+    ,unlines
+      ["lookup(extend(?ctx, ?x, ?a), ?y, ?b) :-"
+      ,"  lookup(?ctx, ?y, ?b)."
+      ]
+
+    ,unlines
+      ["hasType(?ctx, tt, unit)."
+      ]
+
+    ,unlines
+      ["hasType(?ctx, var(?x), ?a) :- lookup(?ctx, ?x, ?a)."
+      ]
+
+    ,unlines
+      ["hasType(?ctx, app(?f, ?x), ?b) :-"
       ,"  hasType(?ctx, ?x, ?a),"
-      ,"  hasType(..., ?f, ?b)."
+      ,"  hasType(?ctx, ?f, arr(?a, ?b))."
+      ]
+
+    ,unlines
+      ["hasType(?ctx, lam(?x, ?body), arr(?a, ?b)) :-"
+      ,"  hasType(extend(?ctx, ?x, ?a), ?body, ?b)."
       ]
     ]
 

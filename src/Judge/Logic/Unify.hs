@@ -15,6 +15,9 @@ import Data.Bifunctor
 
 import Debug.Trace
 
+doOccursCheck :: Bool
+doOccursCheck = False
+
 data UnifyVar a = UnifyVar (Maybe a) Int
 
 -- TODO: Use unbound-generics?
@@ -29,6 +32,7 @@ class (Substitute s f, Eq (UConst s f)) => Unify s f | f -> s where
   getConst :: f a -> Maybe (UConst s f)
 
   matchOne :: f a -> f a -> Maybe [(f a, f a)] -- If the constructors match, give back the children for each
+  getChildren :: f a -> [f a]
 
 class Substitute (s :: Type -> Type) f | s -> f where
   singleSubst :: Eq a => a -> f a -> s a
@@ -144,13 +148,14 @@ unifySubstDisjoint' :: forall s f a b. (Ppr (f (Either b a)), UnifyC s f a, Unif
   s (Either b a) -> f a -> f b -> Maybe (s (Either b a))
 unifySubstDisjoint' subst x y = unifySubst subst (fmap Right x) (fmap Left y)
 
-
 unifySubst :: forall s f a. (Ppr (f a), UnifyC s f a) => s a -> f a -> f a -> Maybe (s a)
 unifySubst subst x y
   | Just xC <- getConst @s @f x, Just yC <- getConst @s @f y =
       if xC == yC
       then Just subst
-      else Nothing
+      else
+        Nothing
+        -- trace ("Cannot unify constants " ++ ppr x ++ " and " ++ ppr y) Nothing
 
   | Just xV <- getVar @s @f x = unifyVar @s @f @a subst xV y
 
@@ -159,7 +164,9 @@ unifySubst subst x y
   | Just paired <- matchOne @s @f x y =
       unifyList subst paired
 
-  | otherwise = Nothing
+  | otherwise =
+      -- trace ("Cannot unify " ++ ppr x ++ " and " ++ ppr y) Nothing
+      Nothing
 
 unifyList :: forall s f a. (Ppr (f a), UnifyC s f a) => s a -> [(f a, f a)] -> Maybe (s a)
 unifyList subst [] = Just subst
@@ -169,12 +176,24 @@ unifyList subst ((x, y) : rest) = do
 
 unifyVar :: forall s f a. (Ppr (f a), UnifyC s f a) => s a -> a -> f a -> Maybe (s a)
 unifyVar subst xV y
+  -- | trace ("unifyVar " ++ ppr xV ++ " and " ++ ppr y) False = undefined
+  | occursCheck xV y = Nothing
+
   | Just yV <- getVar @s @f y, Just yInst <- substLookup subst yV =
-      trace ("unify " ++ ppr xV ++ " and " ++ ppr yInst) $
-      unifySubst @s @f subst (mkVar @s @f xV) yInst
+      -- trace ("unify " ++ ppr xV ++ " and " ++ ppr yInst) $
+      if occursCheck xV yInst
+        then Nothing
+        else unifySubst @s @f subst (mkVar @s @f xV) yInst
       -- newSubst <- unifySubst @s @f subst (mkVar @s @f xV) yInst
       -- extendSubst newSubst yV (mkVar xV)
       -- extendSubst newSubst xV (mkVar yV)
 
-  | otherwise = extendSubst subst xV y
+  | otherwise =
+      extendSubst subst xV y
+
+occursCheck :: (UnifyC s f a, Eq a) => a -> f a -> Bool
+occursCheck v x
+  | not doOccursCheck = False
+  | Just xV <- getVar x = xV == v
+  | otherwise = any (occursCheck v) $ getChildren x
 
