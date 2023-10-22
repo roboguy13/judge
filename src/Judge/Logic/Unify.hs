@@ -28,7 +28,7 @@ class (Substitute s f, Eq (UConst s f)) => Unify s f | f -> s where
   matchOne :: f a -> f a -> Maybe [(f a, f a)] -- If the constructors match, give back the children for each
 
 class Substitute (s :: Type -> Type) f | s -> f where
-  singleSubst :: a -> f a -> s a
+  singleSubst :: Eq a => a -> f a -> s a
   applySubst :: Eq a => s a -> f a -> f a
   combineSubst :: s a -> s a -> Maybe (s a) -- TODO: More error info than a Nothing?
   emptySubst :: s a

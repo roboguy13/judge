@@ -40,43 +40,37 @@ outputAnswer xs0 = loop xs0
 
 kb2 :: [Rule V]
 kb2 =
-  map (fromEither . parseEither parseDecl)
-  ["happy(yolanda)."
-  ,"listens2Music(mia)."
-  ,"listens2Music(yolanda) :- happy(yolanda)."
-  ,"playsAirGuitar(mia) :- listens2Music(mia)."
-  ,"playsAirGuitar(yolanda) :- listens2Music(yolanda)."
-  ]
-  where
-    fromEither (Left e) = error e
-    fromEither (Right r) = r
+  mkExample
+    ["happy(yolanda)."
+    ,"listens2Music(mia)."
+    ,"listens2Music(yolanda) :- happy(yolanda)."
+    ,"playsAirGuitar(mia) :- listens2Music(mia)."
+    ,"playsAirGuitar(yolanda) :- listens2Music(yolanda)."
+    ]
 
 kb3 :: [Rule V]
 kb3 =
-  map (fromEither . parseEither parseDecl)
-   ["happy(vincent)."
-   ,"listens2Music(butch)."
-   ,unlines
-    ["playsAirGuitar(vincent):-"
-    ,    "listens2Music(vincent),"
-    ,    "happy(vincent)."
+  mkExample
+    ["happy(vincent)."
+    ,"listens2Music(butch)."
+    ,unlines
+     ["playsAirGuitar(vincent):-"
+     ,    "listens2Music(vincent),"
+     ,    "happy(vincent)."
+     ]
+    ,unlines
+     ["playsAirGuitar(butch):-"
+     ,    "happy(butch)."
+     ]
+    ,unlines
+     ["playsAirGuitar(butch):-"
+     ,    "listens2Music(butch)."
+     ]
     ]
-   ,unlines
-    ["playsAirGuitar(butch):-"
-    ,    "happy(butch)."
-    ]
-   ,unlines
-    ["playsAirGuitar(butch):-"
-    ,    "listens2Music(butch)."
-    ]
-   ]
-  where
-    fromEither (Left e) = error e
-    fromEither (Right r) = r
 
 kb4 :: [Rule V]
 kb4 =
-  map (fromEither . parseEither parseDecl)
+  mkExample
     ["woman(mia)."
     ,"woman(jody)."
     ,"woman(yolanda)."
@@ -86,13 +80,10 @@ kb4 =
     ,"loves(pumpkin, honey_bunny)."
     ,"loves(honey_bunny, pumpkin)."
     ]
-  where
-    fromEither (Left e) = error e
-    fromEither (Right r) = r
 
 kb5 :: [Rule V]
 kb5 =
-  map (fromEither . parseEither parseDecl)
+  mkExample
     ["loves(vincent,mia)."
     ,"loves(marsellus,mia)."
     ,"loves(pumpkin,honey_bunny)."
@@ -100,6 +91,31 @@ kb5 =
 
     ,"jealous(?X, ?Y) :- loves(?X, ?Z), loves(?Y, ?Z)."
     ]
+
+-- append(Cons(c, Nil), Cons(d, Cons(e, Nil)), Cons(?x, ?r)).
+listExample :: [Rule V]
+listExample =
+  mkExample
+    ["append(Nil, ?y, ?y)."
+    ,unlines
+      ["append(Cons(?x, ?xs), ?y, Cons(?x, ?r)) :-"
+      ,"  append(?xs, ?y, ?r)."
+      ]
+    ]
+
+-- TODO: Contexts and variable rule
+simpleTypes :: [Rule V]
+simpleTypes =
+  mkExample
+    [unlines
+      ["hasType(?ctx, app(?f, ?x), arr(?a, ?b)) :-"
+      ,"  hasType(?ctx, ?x, ?a),"
+      ,"  hasType(..., ?f, ?b)."
+      ]
+    ]
+
+mkExample :: [String] -> [Rule V]
+mkExample = map (fromEither . parseEither parseDecl)
   where
     fromEither (Left e) = error e
     fromEither (Right r) = r

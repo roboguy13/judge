@@ -46,7 +46,7 @@ parseWildcard :: Parser ()
 parseWildcard = lexeme $ void (char '_')
 
 parseTerm :: Parser (LTerm V)
-parseTerm = (lexeme (fmap Var parseVar)) <|> parseConst <|> parseApp
+parseTerm = try parseApp <|> try (lexeme (fmap Var parseVar)) <|> try parseConst
 
 parseConst :: Parser (LTerm a)
 parseConst = lexeme $ fmap Const parseIdent
@@ -60,7 +60,7 @@ parseApp1 = lexeme $ do
     parseArgs = parseTerm `sepBy1` symbol ","
 
 parseApp :: Parser (LTerm V)
-parseApp = parseApp1 <|> fmap Const parseIdent
+parseApp = try parseApp1 <|> fmap Const parseIdent
 
 parseFact :: Parser (Rule V)
 parseFact = lexeme $ do

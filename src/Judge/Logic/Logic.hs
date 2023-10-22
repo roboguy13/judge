@@ -13,6 +13,8 @@ import Data.Maybe
 import Data.List
 import Data.Foldable
 
+import Debug.Trace
+
 data LTerm a
   = Var a
   | Const String
@@ -94,6 +96,7 @@ instance Unify (Subst LTerm) LTerm where
   -- matchOne _ _ = Nothing
 
 instance Substitute (Subst LTerm) LTerm where
+  singleSubst x (Var y) | y == x = Subst []
   singleSubst x t = Subst [(x, t)]
   applySubst subst = \case
     Var x -> case substLookup subst x of
@@ -134,7 +137,7 @@ queryDisplaySubsts qr =
 --           go :: a -> (a, LTerm a)
 --           go x = (x, applySubst subst (Var x))
 
-type QueryC a = Eq a
+type QueryC a = (Ppr a, Eq a)
 
 mkQueryResult :: (LTerm a -> [Subst LTerm a]) -> (LTerm a -> QueryResult a)
 mkQueryResult f goal =
@@ -159,9 +162,13 @@ queryAll = mkQueryResultAll . querySubstAll emptySubst
 querySubst :: QueryC a => Subst LTerm a -> [Rule a] -> LTerm a -> [Subst LTerm a]
 querySubst subst rules goal = do
   rule <- rules
-  newSubst <- maybeToList $ unifySubst subst goal (ruleHead rule)
+  newSubst <-
+    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule)
+    maybeToList $ unifySubst subst goal (ruleHead rule)
 
-  case map (applySubst newSubst) (ruleBody rule) of
+  case
+      trace ("*** using subst " ++ ppr newSubst) $
+      map (applySubst newSubst) (ruleBody rule) of
     [] -> pure newSubst
     newGoals -> querySubstAll newSubst rules newGoals
 
