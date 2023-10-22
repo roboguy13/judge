@@ -33,6 +33,7 @@ class Substitute (s :: Type -> Type) f | s -> f where
   combineSubst :: s a -> s a -> Maybe (s a) -- TODO: More error info than a Nothing?
   emptySubst :: s a
   substLookup :: Eq a => s a -> a -> Maybe (f a)
+  mapSubstRhs :: (f a -> f a) -> s a -> s a
 
 type UnifyC s f a = (Eq a, Unify s f)
 
@@ -45,6 +46,25 @@ applySubstRec subst x =
   case getVar y of
     Just _ -> applySubstRec subst y
     Nothing -> y
+
+-- Use the variables from the first Subst in the result and
+-- use the second Subst to (recursively) substitute for variables
+-- in the RHS's of the first Subst
+simplifySubst :: (Eq a, Unify s f, Monad f) => s a -> s a -> s a
+simplifySubst subst1 subst2 =
+  mapSubstRhs (>>= simplifyVar subst2) subst1
+  -- where
+  --   go x
+  --     | Just v <- getVar x = simplifyVar subst2 v
+  --     | otherwise          = x
+
+simplifyVar :: (Eq a, Unify s f) => s a -> a -> f a
+simplifyVar subst v =
+  case substLookup subst v of
+    Nothing -> mkVar v
+    Just r
+      | Just v' <- getVar r -> simplifyVar subst v'
+      | otherwise           -> r
 
 extendSubst :: UnifyC s f a => s a -> a -> f a -> Maybe (s a)
 extendSubst subst v x = --singleSubst v x `combineSubst` subst

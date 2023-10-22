@@ -13,13 +13,25 @@ import Data.Maybe
 import Data.List
 import Data.Foldable
 
+import Control.Monad
+
 import Debug.Trace
 
 data LTerm a
   = Var a
   | Const String
   | App (LTerm a) (LTerm a)
-  deriving (Show, Eq, Foldable)
+  deriving (Show, Eq, Foldable, Functor)
+
+instance Applicative LTerm where
+  pure = Var
+  (<*>) = ap
+
+instance Monad LTerm where
+  return = pure
+  Var x >>= f = f x
+  Const s >>= _ = Const s
+  App x y >>= f = App (x >>= f) (y >>= f)
 
 data Rule a = LTerm a :- [LTerm a]
   deriving (Show)
@@ -108,6 +120,7 @@ instance Substitute (Subst LTerm) LTerm where
   combineSubst (Subst xs) (Subst ys) = Just $ Subst $ xs <> ys -- TODO: Is this ok?
   emptySubst = Subst []
   substLookup (Subst xs) v = lookup v xs
+  mapSubstRhs f (Subst xs) = Subst (map (fmap f) xs)
 
 data QueryResult a =
   QueryResult
@@ -119,7 +132,9 @@ data QueryResult a =
 -- original query:
 queryDisplaySubsts :: forall a. Eq a => QueryResult a -> [Subst LTerm a]
 queryDisplaySubsts qr =
-    map (nubSubst . mkTheSubst) (queryResultSubsts qr)
+    let initialResultSubst = map mkTheSubst (queryResultSubsts qr)
+    in
+    zipWith simplifySubst initialResultSubst $ queryResultSubsts qr
   where
     mkTheSubst subst = Subst $ map go $ queryOrigVars qr
       where
@@ -166,11 +181,11 @@ querySubst subst rules goal = do
   let rule = freshenRule (getVars goal) rule0
 
   newSubst <-
-    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule)
+    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule)
     maybeToList $ unifySubst subst goal (ruleHead rule)
 
   case
-      trace ("*** using subst " ++ ppr newSubst) $
+      -- trace ("*** using subst " ++ ppr newSubst) $
       map (applySubst newSubst) (ruleBody rule) of
     [] -> pure newSubst
     newGoals -> querySubstAll newSubst rules newGoals
@@ -206,7 +221,7 @@ freshen usedVars t =
     goVar :: a -> a -> Subst f a
     goVar origV v
       | v `elem` usedVars = goVar origV $ varSucc v
-      | otherwise         = singleSubst origV (mkVar (varSucc v))
+      | otherwise         = singleSubst origV (mkVar v)
 
 data V = V String
   deriving (Show, Eq)
