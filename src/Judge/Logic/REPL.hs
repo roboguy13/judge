@@ -23,7 +23,7 @@ replKB rules = runInputT defaultSettings loop
           case parseEither parseQuery line of
             Left e -> outputStrLn e *> loop
             Right queryIn -> do
-              outputAnswer $ query rules queryIn
+              outputAnswer $ queryAll rules queryIn
               loop
 
 outputAnswer :: (Eq a, Eq (f a), Ppr a, Ppr (f a)) => [Subst f a] -> InputT IO ()
@@ -31,7 +31,23 @@ outputAnswer [] = pure ()
 outputAnswer (x:xs) = do
   outputStr (ppr x <> " ")
   getInputChar "" >>= \case
-    Just ';' -> outputStrLn "" *> outputAnswer xs
+    Just ';' -> outputAnswer xs
     Just '.' -> pure ()
     _ -> pure ()
+
+kb4 :: [Rule V]
+kb4 =
+  map (fromEither . parseEither parseDecl)
+    ["woman(mia)."
+    ,"woman(jody)."
+    ,"woman(yolanda)."
+
+    ,"loves(vincent, mia)."
+    ,"loves(marsellus, mia)."
+    ,"loves(pumpkin, honey_bunny)."
+    ,"loves(honey_bunny, pumpkin)."
+    ]
+  where
+    fromEither (Left e) = error e
+    fromEither (Right r) = r
 

@@ -30,7 +30,7 @@ ruleBody (_ :- ys) = ys
 fact :: LTerm a -> Rule a
 fact x = x :- []
 
-type Query = LTerm
+type Query a = [LTerm a]
 
 fromApp :: (LTerm a, LTerm a) -> (LTerm a, [LTerm a])
 fromApp ((App x y), z) =
@@ -103,7 +103,10 @@ instance Substitute (Subst LTerm) LTerm where
   substLookup (Subst xs) v = lookup v xs
 
 query :: Eq a => [Rule a] -> LTerm a -> [Subst LTerm a]
-query rules = querySubst emptySubst rules
+query = querySubst emptySubst
+
+queryAll :: Eq a => [Rule a] -> [LTerm a] -> [Subst LTerm a]
+queryAll = querySubstAll emptySubst
 
 querySubst :: Eq a => Subst LTerm a -> [Rule a] -> LTerm a -> [Subst LTerm a]
 querySubst subst rules goal = do

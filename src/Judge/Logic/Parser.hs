@@ -81,5 +81,5 @@ parseDecl :: Parser (Rule V)
 parseDecl = parseFact <|> parseRule
 
 parseQuery :: Parser (Query V)
-parseQuery = parseApp
+parseQuery = parseApp `sepBy1` symbol ","
 
