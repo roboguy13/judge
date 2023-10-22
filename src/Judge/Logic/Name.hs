@@ -3,6 +3,8 @@ module Judge.Logic.Name
 
 import Judge.Ppr
 
+import Data.Bifunctor
+
 -- De Bruijn levels
 
 data Name a = Name a Int
@@ -18,4 +20,13 @@ instance Ppr a => Ppr (Name a) where
 
 shift :: Name a -> Name a
 shift (Name x i) = Name x (succ i)
+
+class VarC a where
+  varSucc :: a -> a
+
+instance VarC (Name a) where
+  varSucc (Name x i) = Name x (succ i)
+
+instance (VarC a, VarC b) => VarC (Either a b) where
+  varSucc = bimap varSucc varSucc
 

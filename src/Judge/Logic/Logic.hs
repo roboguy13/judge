@@ -35,7 +35,26 @@ instance Monad LTerm where
   App x y >>= f = App (x >>= f) (y >>= f)
 
 data Rule a = LTerm a :- [LTerm a]
-  deriving (Show)
+  deriving (Show, Foldable)
+
+toDebruijnRule :: forall a. (Show a, Eq a) => Rule a -> Rule (Name a)
+toDebruijnRule rule@(hd :- body) =
+  let vars = nub $ toList rule
+
+      renaming :: [(a, Name a)]
+      renaming = zipWith (\x i -> (x, Name x i)) vars [0..]
+  in
+  renameTerm renaming hd :- map (renameTerm renaming) body
+
+  where
+    renameTerm :: (Show x, Eq x) => [(x, y)] -> LTerm x -> LTerm y
+    renameTerm = fmap . rename
+
+    rename :: (Show x, Eq x) => [(x, y)] -> x -> y
+    rename assocs v =
+      case lookup v assocs of
+        Just v' -> v'
+        _ -> error $ "toDebruijnRule.rename: cannot find name " ++ show v
 
 ruleHead :: Rule a -> LTerm a
 ruleHead (x :- _) = x
@@ -122,6 +141,7 @@ instance Substitute (Subst LTerm) LTerm where
   emptySubst = Subst []
   substLookup (Subst xs) v = lookup v xs
   mapSubstRhs f (Subst xs) = Subst (map (fmap f) xs)
+  mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 
 data QueryResult a =
   QueryResult
@@ -172,10 +192,10 @@ mkQueryResultAll f goal =
 query :: QueryC a => [Rule (Name a)] -> LTerm a -> QueryResult a
 query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 
-queryAll :: QueryC a => [Rule (Name a)] -> [LTerm a] -> QueryResult a
+queryAll :: (QueryC a) => [Rule (Name a)] -> [LTerm a] -> QueryResult a
 queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
 
-querySubst :: (QueryC a, QueryC b) => Subst LTerm (Either (Name a) b) -> [Rule (Name a)] -> LTerm b -> [Subst LTerm (Either (Name a) b)]
+querySubst :: (QueryC a, QueryC b) => Subst LTerm (Either a b) -> [Rule a] -> LTerm b -> [Subst LTerm (Either a b)]
 querySubst subst rules goal = do
   rule <- rules
 
@@ -185,18 +205,18 @@ querySubst subst rules goal = do
 
   case
       -- trace ("*** using subst " ++ ppr newSubst) $
-      map (applyDisjointSubst_Left subst) (ruleBody rule) of
+      map (applyDisjointSubst_Left newSubst) (ruleBody rule) of
     [] -> pure newSubst
-    newGoals -> let r = querySubstAll newSubst rules (map _ newGoals) in undefined
+    newGoals ->
+      let rs = querySubstAll (toDisjointSubst_Right newSubst) rules (map (fmap Left) newGoals)
+      in
+      map fromDisjointSubst_Right rs
 
-querySubstAll :: (QueryC a, QueryC b) => Subst LTerm (Either (Name a) b) -> [Rule (Name a)] -> [LTerm b] -> [Subst LTerm (Either (Name a) b)]
+querySubstAll :: (QueryC a, QueryC b) => Subst LTerm (Either a b) -> [Rule a] -> [LTerm b] -> [Subst LTerm (Either a b)]
 querySubstAll subst rules [] = pure subst
 querySubstAll subst rules (x:xs) = do
   newSubst <- querySubst subst rules x
   querySubstAll newSubst rules xs
-
-class VarC a where
-  varSucc :: a -> a
 
 -- freshenRule :: forall f a. (VarC a, Eq a) => [a] -> Rule a -> Rule a
 -- freshenRule usedVars (x :- xs) = freshen usedVars x :- map (freshen usedVars) xs
