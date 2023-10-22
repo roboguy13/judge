@@ -16,7 +16,7 @@ data LTerm a
   = Var a
   | Const String
   | App (LTerm a) (LTerm a)
-  deriving (Show)
+  deriving (Show, Eq)
 
 data Rule a = LTerm a :- [LTerm a]
   deriving (Show)
@@ -57,6 +57,16 @@ instance Ppr a => Ppr [LTerm a] where
 data Subst f a = Subst [(a, f a)]
   deriving (Show)
 
+-- TODO: Use sets for Subst instead
+nubSubst :: (Eq a, Eq (f a)) => Subst f a -> Subst f a
+nubSubst (Subst xs) = Subst (nub xs)
+
+instance (Eq a, Eq (f a), Ppr a, Ppr (f a)) => Ppr (Subst f a) where
+  pprDoc (Subst []) = "yes"
+  pprDoc (Subst xs0) = foldr1 ($$) (map go (nub xs0))
+    where
+      go (x, y) = pprDoc x <+> text "=" <+> pprDoc y
+
 class Solve a v | a -> v where
   toLTerm :: a -> LTerm v
   fromLTerm :: LTerm v -> a
@@ -93,7 +103,7 @@ instance Substitute (Subst LTerm) LTerm where
   substLookup (Subst xs) v = lookup v xs
 
 query :: Eq a => [Rule a] -> LTerm a -> [Subst LTerm a]
-query = querySubst emptySubst
+query rules = querySubst emptySubst rules
 
 querySubst :: Eq a => Subst LTerm a -> [Rule a] -> LTerm a -> [Subst LTerm a]
 querySubst subst rules goal = do

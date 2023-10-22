@@ -13,6 +13,12 @@ import Data.Functor
 
 type Parser = Parsec Void String
 
+parseEither :: Parser a -> String -> Either String a
+parseEither p str =
+  case parse p "<input>" str of
+    Left err -> Left $ errorBundlePretty err
+    Right r -> Right r
+
 sc :: Parser ()
 sc = L.space
   space1
@@ -40,13 +46,13 @@ parseWildcard :: Parser ()
 parseWildcard = lexeme $ void (char '_')
 
 parseTerm :: Parser (LTerm V)
-parseTerm = fmap Var parseVar <|> parseConst <|> parseApp
+parseTerm = (lexeme (fmap Var parseVar)) <|> parseConst <|> parseApp
 
 parseConst :: Parser (LTerm a)
-parseConst = fmap Const parseIdent
+parseConst = lexeme $ fmap Const parseIdent
 
 parseApp1 :: Parser (LTerm V)
-parseApp1 = do
+parseApp1 = lexeme $ do
   f <- fmap Const parseIdent
   args <- symbol "(" *> parseArgs <* symbol ")"
   pure $ foldl App f args
@@ -57,19 +63,22 @@ parseApp :: Parser (LTerm V)
 parseApp = parseApp1 <|> fmap Const parseIdent
 
 parseFact :: Parser (Rule V)
-parseFact = do
+parseFact = lexeme $ do
   hd <- parseApp
   symbol "."
   pure (hd :- [])
 
 parseRule :: Parser (Rule V)
-parseRule = do
+parseRule = lexeme $ do
   hd <- parseApp
   symbol ":-"
   body <- parseApp `sepBy1` symbol ","
   symbol "."
 
   pure (hd :- body)
+
+parseDecl :: Parser (Rule V)
+parseDecl = parseFact <|> parseRule
 
 parseQuery :: Parser (Query V)
 parseQuery = parseApp
