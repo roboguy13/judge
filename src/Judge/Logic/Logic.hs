@@ -119,7 +119,7 @@ data QueryResult a =
 -- original query:
 queryDisplaySubsts :: forall a. Eq a => QueryResult a -> [Subst LTerm a]
 queryDisplaySubsts qr =
-    map mkTheSubst (queryResultSubsts qr)
+    map (nubSubst . mkTheSubst) (queryResultSubsts qr)
   where
     mkTheSubst subst = Subst $ map go $ queryOrigVars qr
       where
@@ -137,7 +137,7 @@ queryDisplaySubsts qr =
 --           go :: a -> (a, LTerm a)
 --           go x = (x, applySubst subst (Var x))
 
-type QueryC a = (Ppr a, Eq a)
+type QueryC a = (Ppr a, Eq a, VarC a)
 
 mkQueryResult :: (LTerm a -> [Subst LTerm a]) -> (LTerm a -> QueryResult a)
 mkQueryResult f goal =
@@ -161,7 +161,10 @@ queryAll = mkQueryResultAll . querySubstAll emptySubst
 
 querySubst :: QueryC a => Subst LTerm a -> [Rule a] -> LTerm a -> [Subst LTerm a]
 querySubst subst rules goal = do
-  rule <- rules
+  rule0 <- rules
+
+  let rule = freshenRule (getVars goal) rule0
+
   newSubst <-
     trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule)
     maybeToList $ unifySubst subst goal (ruleHead rule)
@@ -178,11 +181,41 @@ querySubstAll subst rules (x:xs) = do
   newSubst <- querySubst subst rules x
   querySubstAll newSubst rules xs
 
+class VarC a where
+  varSucc :: a -> a
+
+freshenRule :: forall f a. (VarC a, Eq a) => [a] -> Rule a -> Rule a
+freshenRule usedVars (x :- xs) = freshen usedVars x :- map (freshen usedVars) xs
+
+freshen :: forall f a. (Unify (Subst f) f, Substitute (Subst f) f, VarC a, Eq a, Foldable f) => [a] -> f a -> f a
+freshen usedVars t =
+  let vars = toList t
+      subst = go vars
+  in
+  applySubst subst t
+  where
+    go :: [a] -> Subst f a
+    go [] = Subst []
+    go (v:vs)
+      | v `elem` usedVars =
+          let Just r = goVar v v `combineSubst` go vs
+          in
+          r
+      | otherwise         = go vs
+
+    goVar :: a -> a -> Subst f a
+    goVar origV v
+      | v `elem` usedVars = goVar origV $ varSucc v
+      | otherwise         = singleSubst origV (mkVar (varSucc v))
+
 data V = V String
   deriving (Show, Eq)
 
 instance Ppr V where
   pprDoc (V x) = text "?" <.> pprDoc x
+
+instance VarC V where
+  varSucc (V x) = V $ x <> "_"
 
 testKB :: [Rule V]
 testKB =
