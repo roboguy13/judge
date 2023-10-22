@@ -23,7 +23,7 @@ replKB rules = runInputT defaultSettings loop
           case parseEither parseQuery line of
             Left e -> outputStrLn e *> loop
             Right queryIn -> do
-              outputAnswer $ queryAll rules queryIn
+              outputAnswer $ queryDisplaySubsts $ queryAll rules queryIn
               loop
 
 outputAnswer :: (Eq a, Eq (f a), Ppr a, Ppr (f a)) => [Subst f a] -> InputT IO ()
@@ -90,7 +90,6 @@ kb4 =
     fromEither (Left e) = error e
     fromEither (Right r) = r
 
--- Non-working example:
 kb5 :: [Rule V]
 kb5 =
   map (fromEither . parseEither parseDecl)
@@ -99,7 +98,7 @@ kb5 =
     ,"loves(pumpkin,honey_bunny)."
     ,"loves(honey_bunny,pumpkin)."
 
-    ,"jealous(X,Y) :- loves(X,Z), loves(Y,Z)."
+    ,"jealous(?X, ?Y) :- loves(?X, ?Z), loves(?Y, ?Z)."
     ]
   where
     fromEither (Left e) = error e

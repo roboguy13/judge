@@ -11,12 +11,13 @@ import Judge.Ppr
 
 import Data.Maybe
 import Data.List
+import Data.Foldable
 
 data LTerm a
   = Var a
   | Const String
   | App (LTerm a) (LTerm a)
-  deriving (Show, Eq)
+  deriving (Show, Eq, Foldable)
 
 data Rule a = LTerm a :- [LTerm a]
   deriving (Show)
@@ -29,6 +30,9 @@ ruleBody (_ :- ys) = ys
 
 fact :: LTerm a -> Rule a
 fact x = x :- []
+
+getVars :: LTerm a -> [a]
+getVars = toList
 
 type Query a = [LTerm a]
 
@@ -102,22 +106,66 @@ instance Substitute (Subst LTerm) LTerm where
   emptySubst = Subst []
   substLookup (Subst xs) v = lookup v xs
 
-query :: Eq a => [Rule a] -> LTerm a -> [Subst LTerm a]
-query = querySubst emptySubst
+data QueryResult a =
+  QueryResult
+  { queryOrigVars :: [a]
+  , queryResultSubsts :: [Subst LTerm a]
+  }
 
-queryAll :: Eq a => [Rule a] -> [LTerm a] -> [Subst LTerm a]
-queryAll = querySubstAll emptySubst
+-- | Display the resulting `Subst`s in terms of the variables from the
+-- original query:
+queryDisplaySubsts :: forall a. Eq a => QueryResult a -> [Subst LTerm a]
+queryDisplaySubsts qr =
+    map mkTheSubst (queryResultSubsts qr)
+  where
+    mkTheSubst subst = Subst $ map go $ queryOrigVars qr
+      where
+        go :: a -> (a, LTerm a)
+        go x = (x, applySubstRec subst (Var x))
 
-querySubst :: Eq a => Subst LTerm a -> [Rule a] -> LTerm a -> [Subst LTerm a]
+-- instance (Eq a, Ppr a) => Ppr (QueryResult a) where
+--   pprDoc qr =
+--       -- Display the resulting `Subst`s in terms of the variables from the
+--       -- original query:
+--       pprDoc (map mkTheSubst (queryResultSubsts qr))
+--     where
+--       mkTheSubst subst = Subst $ map go $ queryOrigVars qr
+--         where
+--           go :: a -> (a, LTerm a)
+--           go x = (x, applySubst subst (Var x))
+
+type QueryC a = Eq a
+
+mkQueryResult :: (LTerm a -> [Subst LTerm a]) -> (LTerm a -> QueryResult a)
+mkQueryResult f goal =
+  QueryResult
+  { queryOrigVars = getVars goal
+  , queryResultSubsts = f goal
+  }
+
+mkQueryResultAll :: ([LTerm a] -> [Subst LTerm a]) -> ([LTerm a] -> QueryResult a)
+mkQueryResultAll f goal =
+  QueryResult
+  { queryOrigVars = concatMap getVars goal
+  , queryResultSubsts = f goal
+  }
+
+query :: QueryC a => [Rule a] -> LTerm a -> QueryResult a
+query = mkQueryResult . querySubst emptySubst
+
+queryAll :: QueryC a => [Rule a] -> [LTerm a] -> QueryResult a
+queryAll = mkQueryResultAll . querySubstAll emptySubst
+
+querySubst :: QueryC a => Subst LTerm a -> [Rule a] -> LTerm a -> [Subst LTerm a]
 querySubst subst rules goal = do
   rule <- rules
   newSubst <- maybeToList $ unifySubst subst goal (ruleHead rule)
 
   case map (applySubst newSubst) (ruleBody rule) of
     [] -> pure newSubst
-    newGoals -> querySubstAll subst rules newGoals
+    newGoals -> querySubstAll newSubst rules newGoals
 
-querySubstAll :: Eq a => Subst LTerm a -> [Rule a] -> [LTerm a] -> [Subst LTerm a]
+querySubstAll :: QueryC a => Subst LTerm a -> [Rule a] -> [LTerm a] -> [Subst LTerm a]
 querySubstAll subst rules [] = pure subst
 querySubstAll subst rules (x:xs) = do
   newSubst <- querySubst subst rules x

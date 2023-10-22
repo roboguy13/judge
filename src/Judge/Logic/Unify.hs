@@ -10,6 +10,8 @@ module Judge.Logic.Unify
 import Data.Kind
 -- import Control.Lens.Plated
 
+import Debug.Trace
+
 data UnifyVar a = UnifyVar (Maybe a) Int
 
 -- TODO: Use unbound-generics?
@@ -32,7 +34,19 @@ class Substitute (s :: Type -> Type) f | s -> f where
   emptySubst :: s a
   substLookup :: Eq a => s a -> a -> Maybe (f a)
 
-extendSubst :: (Eq a, Unify s f) => s a -> a -> f a -> Maybe (s a)
+type UnifyC s f a = (Eq a, Unify s f)
+
+-- TODO: Be careful to not get stuck in a loop when two variables are
+-- "equal" to each other in the substitution?
+applySubstRec :: (Eq a, Unify s f) => s a -> f a -> f a
+applySubstRec subst x =
+  let y = applySubst subst x
+  in
+  case getVar y of
+    Just _ -> applySubstRec subst y
+    Nothing -> y
+
+extendSubst :: UnifyC s f a => s a -> a -> f a -> Maybe (s a)
 extendSubst subst v x = --singleSubst v x `combineSubst` subst
   case substLookup subst v of
     Nothing -> singleSubst v x `combineSubst` subst
@@ -46,10 +60,10 @@ combineSubsts xs = foldr combine (Just emptySubst) xs
       y <- maybeY
       combineSubst x y
 
-unify :: forall s f a. (Eq a, Unify s f) => f a -> f a -> Maybe (s a)
+unify :: forall s f a. UnifyC s f a => f a -> f a -> Maybe (s a)
 unify = unifySubst emptySubst
 
-unifySubst :: forall s f a. (Eq a, Unify s f) => s a -> f a -> f a -> Maybe (s a)
+unifySubst :: forall s f a. UnifyC s f a => s a -> f a -> f a -> Maybe (s a)
 unifySubst subst x y
   | Just xC <- getConst @s @f x, Just yC <- getConst @s @f y =
       if xC == yC
@@ -65,10 +79,13 @@ unifySubst subst x y
 
   | otherwise = Nothing
 
-unifyVar :: forall s f a. (Eq a, Unify s f) => s a -> a -> f a -> Maybe (s a)
+unifyVar :: forall s f a. UnifyC s f a => s a -> a -> f a -> Maybe (s a)
 unifyVar subst xV y
   | Just yV <- getVar @s @f y, Just yInst <- substLookup subst yV =
       unifySubst @s @f subst (mkVar @s @f xV) yInst
+      -- newSubst <- unifySubst @s @f subst (mkVar @s @f xV) yInst
+      -- extendSubst newSubst yV (mkVar xV)
+      -- extendSubst newSubst xV (mkVar yV)
 
   | otherwise = extendSubst subst xV y
 
