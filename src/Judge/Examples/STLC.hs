@@ -1,11 +1,13 @@
-{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE FlexibleInstances #-}
 
 module Judge.Examples.STLC
   where
+
+import Prelude hiding (lookup)
 
 -- import Judge.Rule hiding (V (..))
 -- import Judge.Vec
@@ -14,6 +16,8 @@ import Judge.Logic.Unify
 import Judge.Ppr
 import qualified Judge.Logic.Logic as L
 import Judge.Logic.Name
+
+import Data.String
 
 import Control.Monad
 
@@ -53,6 +57,11 @@ mkV x = V (MV x)
 mkTyV x = TyV (MV x)
 mkCtxV x = CtxV (MV x)
 
+-- instance IsString (Meta String) where fromString = MV
+-- instance IsString (Term (Meta String)) where fromString = mkV
+-- instance IsString (Type (Meta String)) where fromString = mkTyV
+-- instance IsString (Ctx (Meta String)) where fromString = mkCtxV
+
 instance Applicative Meta where
   pure = MV
   (<*>) = ap
@@ -83,7 +92,7 @@ instance Ppr a => Ppr (Type a) where
 
 instance Ppr a => Ppr (Ctx a) where
   pprDoc (CtxV x) = pprDoc x
-  pprDoc Empty = "Empty"
+  pprDoc Empty = text "Empty"
   pprDoc (Extend ctx x a) =
     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
 
@@ -172,24 +181,71 @@ matchOne' x@(MV {}) y = Just [(x, y)]
 matchOne' x y@(MV {}) = Just [(x, y)]
 matchOne' x y = matchOne x y
 
+class MetaC a where toMeta :: a -> Meta String
+class TypeC a where toType :: a -> Type (Meta String)
+class TermC a where toTerm :: a -> Term (Meta String)
+class CtxC a where toCtx :: a -> Ctx (Meta String)
+
+instance MetaC String where toMeta = MV
+instance MetaC (Meta String) where toMeta = id
+
+instance TypeC String where toType = TyV . MV
+instance TypeC (Type (Meta String)) where toType = id
+
+instance TermC String where toTerm = V . MV
+instance TermC (Term (Meta String)) where toTerm = id
+
+instance CtxC String where toCtx = CtxV . MV
+instance CtxC (Ctx (Meta String)) where toCtx = id
+
+empty :: Ctx (Meta String)
+empty = Empty
+
+extend :: (CtxC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Ctx (Meta String)
+extend ctx x a = Extend (toCtx ctx) (toMeta x) (toType a)
+
+lookup :: (CtxC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Meta String
+lookup ctx x a = Lookup (toCtx ctx) (toMeta x) (toType a)
+
+hasType :: (CtxC ctx, TermC term, TypeC ty) => ctx -> term -> ty -> Meta String
+hasType ctx x a = HasType (toCtx ctx) (toTerm x) (toType a)
+
+mkUnit :: Term a
+mkUnit = MkUnit
+
+app :: (TermC term1, TermC term2) => term1 -> term2 -> Term (Meta String)
+app x y = App (toTerm x) (toTerm y)
+
+lam :: (MetaC meta, TermC term) => meta -> term -> Term (Meta String)
+lam x y = Lam (toMeta x) (toTerm y)
+
+unit :: Type a
+unit = Unit
+
+arr :: (TypeC ty1, TypeC ty2) => ty1 -> ty2 -> Type (Meta String)
+arr x y = Arr (toType x) (toType y)
+
+-- class MetaC 
+
 tcRules :: [Rule Meta (Name L.V)]
-tcRules = map toDebruijnRule
-  [fact $ Lookup (Extend (mkCtxV "ctx") (MV "x") (mkTyV "a")) (MV "x") (mkTyV "a")
-  ,Lookup (Extend (mkCtxV "ctx") (MV "x") (mkTyV "a")) (MV "y") (mkTyV "b")
+tcRules = map (toDebruijnRule . fmap L.V)
+  [fact $ lookup (extend "ctx" "x" "a") "x" "a"
+  ,lookup (extend "ctx" "x" "a") "y" "b"
     :-
-    [Lookup (mkCtxV "ctx") (MV "y") (mkTyV "b")]
+    [lookup "ctx" "y" "b"]
 
-  ,fact $ HasType (mkCtxV "ctx") MkUnit Unit
+  ,fact $ hasType @_ @(Term (Meta String)) @(Type (Meta String))
+            "ctx" mkUnit unit
 
-  ,HasType (mkCtxV "ctx") (App (mkV "x") (mkV "y")) (mkTyV "b")
+  ,hasType "ctx" (app "x" "y") "b"
     :-
-    [HasType (mkCtxV "ctx") (mkV "x") (Arr (mkTyV "a") (mkTyV "b"))
-    ,HasType (mkCtxV "ctx") (mkV "y") (mkTyV "a")
+    [hasType "ctx" "x" (arr "a" "b")
+    ,hasType "ctx" "y" "a"
     ]
 
-  ,HasType (mkCtxV "ctx") (Lam (MV "x") (mkV "body")) (Arr (mkTyV "a") (mkTyV "b"))
+  ,hasType "ctx" (lam "x" "body") (arr "a" "b")
     :-
-    [HasType (Extend (mkCtxV "ctx") (MV "x") (mkTyV "a")) (mkV "body") (mkTyV "b")
+    [hasType (extend "ctx" "x" "a") "body" "b"
     ]
   ]
 
@@ -199,6 +255,6 @@ test1 =
 
 test2 =
   query tcRules
-    $ HasType Empty (Lam (MV "x") MkUnit) (TyV (MV "a"))
-        
+    $ HasType Empty (Lam (MV (L.V "x")) MkUnit) (TyV (MV (L.V "a")))
+
 

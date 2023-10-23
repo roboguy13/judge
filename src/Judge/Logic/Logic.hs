@@ -278,8 +278,8 @@ instance VarC V where
       toUnify (UnifyV (Name y _)) = UnifyV (Name y i)
   fromDisjointName (Right y) = y
 
-instance IsString V where
-  fromString = V
+-- instance IsString V where
+--   fromString = V
 
 -- testKB :: [Rule V]
 -- testKB =

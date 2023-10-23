@@ -30,7 +30,6 @@ class (Substitute f, Eq (UConst f)) => Unify f where
 
   getVar :: f a -> Maybe a
   mkVar :: a -> f a
-  -- mkVar :: UnifyVar (UVar (USubst a) a) -> a
 
   getConst :: f a -> Maybe (UConst f)
 
@@ -44,7 +43,7 @@ newtype Subst f a = Subst [(a, f a)]
   deriving (Show, Functor, Foldable, Traversable)
 
 instance (Eq a, Eq (f a), Ppr a, Ppr (f a)) => Ppr (Subst f a) where
-  pprDoc (Subst []) = "yes"
+  pprDoc (Subst []) = text "yes"
   pprDoc (Subst xs0) = foldr1 ($$) (map go (nub xs0))
     where
       go (x, y) = pprDoc x <+> text "=" <+> pprDoc y
