@@ -3,6 +3,8 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE TypeFamilyDependencies #-}
+{-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE QuantifiedConstraints #-}
 
 module Judge.Logic.Unify
   where
@@ -15,6 +17,12 @@ import Data.Bifunctor
 
 import Data.List
 import Data.Maybe
+
+import GHC.Generics
+
+import Control.Applicative hiding (Const, getConst)
+
+import Data.Void
 
 import Debug.Trace
 
@@ -36,8 +44,83 @@ class (Substitute f, Eq (UConst f)) => Unify f where
   matchOne :: f a -> f a -> Maybe [(f a, f a)] -- If the constructors match, give back the children for each
   getChildren :: f a -> [f a]
 
+  default matchOne :: (Generic1 f, Unify (Rep1 f)) => f a -> f a -> Maybe [(f a, f a)]
+  matchOne x y = map (bimap to1 to1) <$> matchOne (from1 x) (from1 y)
+
+instance (Unify f) => Unify (M1 i c f) where
+  type UConst (M1 i c f) = UConst f
+  matchOne (M1 x) (M1 y) = map (bimap M1 M1) <$> matchOne x y
+
+instance Unify U1 where
+  type UConst U1 = Void
+  matchOne _ _ = Just []
+
+instance Eq c => Unify (K1 i c) where
+  type UConst (K1 i c) = ()
+  matchOne (K1 a) (K1 b)
+    | a == b = Just []
+    | otherwise = Nothing
+
+instance (Unify f, Unify g) => Unify (f :+: g) where
+  type UConst (f :+: g) = Either (UConst f) (UConst g)
+  matchOne (L1 x) (L1 y) = map (bimap L1 L1) <$> matchOne x y
+  matchOne (R1 x) (R1 y) = map (bimap R1 R1) <$> matchOne x y
+  matchOne _ _ = Nothing
+
+instance (Unify f, Unify g) => Unify (f :*: g) where
+  type UConst (f :*: g) = (UConst f, UConst g)
+  matchOne (x :*: y) (x' :*: y') = do
+    a <- matchOne x x'
+    b <- matchOne y y'
+    pure $ zipWith go a b
+    where
+      go (p, q) (p', q') = (p :*: p', q :*: q')
+
+instance (forall z. Eq z => Eq (g z), Applicative g, Unify f, Unify g) => Unify (f :.: g) where
+  type UConst (f :.: g) = UConst f
+  matchOne (Comp1 x) (Comp1 y) = map (bimap Comp1 Comp1) <$> matchOne x y
+
+instance Unify Par1 where
+  type UConst Par1 = Void
+  matchOne (Par1 x) (Par1 y) = Just [(Par1 x, Par1 y)]
+
+instance (Unify f) => Unify (Rec1 f) where
+  type UConst (Rec1 f) = UConst f
+  matchOne (Rec1 a) (Rec1 b) = map (bimap Rec1 Rec1) <$> matchOne a b
+
 class Substitute f where
   applySubst :: Eq a => Subst f a -> f a -> f a
+
+instance Substitute f => Substitute (M1 i c f) where
+  applySubst subst (M1 x) = M1 $ applySubst (mapSubstRhs unM1 subst) x
+
+instance Substitute U1 where
+  applySubst _ U1 = U1
+
+instance Substitute (K1 i c) where
+  applySubst _ (K1 a) = K1 a
+
+instance (Substitute f, Substitute g) => Substitute (f :+: g) where
+  applySubst subst (L1 a) = L1 $ applySubst (mapMaybeSubst go subst) a
+    where
+      go x (L1 y) = Just (x, y)
+      go _ _ = Nothing
+  applySubst subst (R1 b) = R1 $ applySubst (mapMaybeSubst go subst) b
+    where
+      go x (R1 y) = Just (x, y)
+      go _ _ = Nothing
+
+instance (Substitute f, Substitute g) => Substitute (f :*: g) where
+
+instance (forall z. Eq z => Eq (g z), Applicative g, Substitute f, Substitute g) => Substitute (f :.: g) where
+  applySubst subst (Comp1 x) = Comp1 $ applySubst (mapMaybeSubst go subst) x
+    where
+      go :: a -> (f :.: g) a -> Maybe (g a, f (g a))
+      go a (Comp1 b) = Just (pure a, b)
+
+instance (Substitute f) => Substitute (Rec1 f) where
+instance Substitute Par1 where
+  applySubst _ = id
 
 newtype Subst f a = Subst [(a, f a)]
   deriving (Show, Functor, Foldable, Traversable)
@@ -62,10 +145,10 @@ emptySubst = Subst []
 substLookup :: Eq a => Subst f a -> a -> Maybe (f a)
 substLookup (Subst xs) x = lookup x xs
 
-mapSubstRhs :: (f a -> f a) -> Subst f a -> Subst f a
+mapSubstRhs :: (f a -> g a) -> Subst f a -> Subst g a
 mapSubstRhs f (Subst xs) = Subst (map (fmap f) xs)
 
-mapMaybeSubst :: (a -> f a -> Maybe (b, f b)) -> Subst f a -> Subst f b
+mapMaybeSubst :: (a -> f a -> Maybe (b, g b)) -> Subst f a -> Subst g b
 mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 
 -- applySubst :: (Unify f, Eq a) => Subst f a -> f a -> f a

@@ -23,13 +23,15 @@ import Control.Applicative hiding (Const)
 
 import Control.Monad.Morph
 
+import GHC.Generics
+
 import Debug.Trace
 
 data LTerm a
   = Var a
   | Const String
   | App (LTerm a) (LTerm a)
-  deriving (Show, Eq, Foldable, Traversable, Functor)
+  deriving (Show, Eq, Foldable, Traversable, Functor, Generic, Generic1)
 
 instance Applicative LTerm where
   pure = Var
@@ -119,12 +121,12 @@ instance Unify LTerm where
   getConst (Const x) = Just x
   getConst _ = Nothing
 
-  matchOne (Var {}) _ = Nothing -- We don't handle the Var cases here
-  matchOne _ (Var {}) = Nothing
-  matchOne (Const {}) _ = Nothing -- We also don't handle the Const cases here
-  matchOne _ (Const {}) = Nothing
-  matchOne (App x y) (App x' y') = Just [(x, x'), (y, y')]
-  -- matchOne _ _ = Nothing
+  -- matchOne (Var {}) _ = Nothing -- We don't handle the Var cases here
+  -- matchOne _ (Var {}) = Nothing
+  -- matchOne (Const {}) _ = Nothing -- We also don't handle the Const cases here
+  -- matchOne _ (Const {}) = Nothing
+  -- matchOne (App x y) (App x' y') = Just [(x, x'), (y, y')]
+  -- -- matchOne _ _ = Nothing
 
   getChildren (App x y) = [x, y]
   getChildren _ = []

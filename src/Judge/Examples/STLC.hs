@@ -17,6 +17,8 @@ import Judge.Ppr
 import qualified Judge.Logic.Logic as L
 import Judge.Logic.Name
 
+import GHC.Generics hiding (Meta)
+
 import Data.String
 
 import Control.Monad
@@ -28,17 +30,17 @@ import Data.Maybe
 import Bound
 
 data Type a = TyV a | Unit | Arr (Type a) (Type a)
-  deriving (Show, Functor, Foldable)
+  deriving (Show, Functor, Foldable, Eq)
 
 data Term a where
   V :: a -> Term a
   App :: Term a -> Term a -> Term a
   Lam :: a -> Term a -> Term a
   MkUnit :: Term a
-  deriving (Show, Functor, Foldable)
+  deriving (Show, Functor, Foldable, Generic1, Eq)
 
 data Ctx a = CtxV a | Empty | Extend (Ctx a) a (Type a)
-  deriving (Show, Functor, Foldable)
+  deriving (Show, Functor, Foldable, Generic1, Eq)
 
 data Meta a where
   MV :: a -> Meta a
@@ -48,7 +50,7 @@ data Meta a where
   Tm :: Term (Meta a) -> Meta a
   Tp :: Type (Meta a) -> Meta a
   Ctx :: Ctx (Meta a) -> Meta a
-  deriving (Show, Functor, Foldable)
+  deriving (Show, Functor, Foldable, Generic1, Eq)
 
   -- Tp :: Type (Meta a) -> Meta a
   -- Tm :: Term (Meta a) -> Meta a
@@ -127,35 +129,35 @@ instance Unify Meta where
   mkVar = MV
   getConst _ = Nothing
 
-  matchOne (MV {}) _ = Nothing
-  matchOne _ (MV {}) = Nothing
-  matchOne (Lookup ctx x a) (Lookup ctx' x' a') =
-    Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
-
-  matchOne (HasType ctx t a) (HasType ctx' t' a') =
-    Just [(Ctx ctx, Ctx ctx'), (Tm t, Tm t'), (Tp a, Tp a')]
-
-  matchOne (Ctx Empty) (Ctx Empty) = Just []
-  matchOne (Ctx (Extend ctx x a)) (Ctx (Extend ctx' x' a')) =
-    Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
-  matchOne (Ctx (CtxV x)) y = matchOne' x y
-  matchOne x (Ctx (CtxV y)) = matchOne' x y
-
-  matchOne (Tp Unit) (Tp Unit) = Just []
-  matchOne (Tp (Arr a b)) (Tp (Arr a' b')) =
-    Just [(Tp a, Tp a'), (Tp b, Tp b')]
-  matchOne (Tp (TyV x)) y = matchOne' x y
-  matchOne x (Tp (TyV y)) = matchOne' x y
-
-  matchOne (Tm (V x)) y = matchOne' x y
-  matchOne x (Tm (V y)) = matchOne' x y
-  matchOne (Tm (App x y)) (Tm (App x' y')) =
-    Just [(Tm x, Tm y), (Tm x', Tm y')]
-  matchOne (Tm (Lam x body)) (Tm (Lam x' body')) =
-    Just [(x, x'), (Tm body, Tm body')]
-  matchOne (Tm MkUnit) (Tm MkUnit) = Just []
-  matchOne _ _ = Nothing
-
+  -- matchOne (MV {}) _ = Nothing
+  -- matchOne _ (MV {}) = Nothing
+  -- matchOne (Lookup ctx x a) (Lookup ctx' x' a') =
+  --   Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
+  --
+  -- matchOne (HasType ctx t a) (HasType ctx' t' a') =
+  --   Just [(Ctx ctx, Ctx ctx'), (Tm t, Tm t'), (Tp a, Tp a')]
+  --
+  -- matchOne (Ctx Empty) (Ctx Empty) = Just []
+  -- matchOne (Ctx (Extend ctx x a)) (Ctx (Extend ctx' x' a')) =
+  --   Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
+  -- matchOne (Ctx (CtxV x)) y = matchOne' x y
+  -- matchOne x (Ctx (CtxV y)) = matchOne' x y
+  --
+  -- matchOne (Tp Unit) (Tp Unit) = Just []
+  -- matchOne (Tp (Arr a b)) (Tp (Arr a' b')) =
+  --   Just [(Tp a, Tp a'), (Tp b, Tp b')]
+  -- matchOne (Tp (TyV x)) y = matchOne' x y
+  -- matchOne x (Tp (TyV y)) = matchOne' x y
+  --
+  -- matchOne (Tm (V x)) y = matchOne' x y
+  -- matchOne x (Tm (V y)) = matchOne' x y
+  -- matchOne (Tm (App x y)) (Tm (App x' y')) =
+  --   Just [(Tm x, Tm y), (Tm x', Tm y')]
+  -- matchOne (Tm (Lam x body)) (Tm (Lam x' body')) =
+  --   Just [(x, x'), (Tm body, Tm body')]
+  -- matchOne (Tm MkUnit) (Tm MkUnit) = Just []
+  -- matchOne _ _ = Nothing
+  --
   getChildren (MV {}) = []
   getChildren (Lookup ctx x a) = [Ctx ctx, x, Tp a]
 
