@@ -16,6 +16,8 @@ import Data.List
 import Data.Either
 import Data.Foldable
 
+import Data.String
+
 import Control.Monad
 import Control.Applicative hiding (Const)
 
@@ -204,36 +206,36 @@ mkQueryResultAll f goal =
   , queryResultSubsts = f goal
   }
 
-query :: (QueryC f a, Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
+query :: (QueryC f a, Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 query rules =
   mkQueryResult $ \goal ->
       runFreshT (querySubst emptySubst (map (fmap Left) rules) (fmap Right goal))
 
 
-queryAll :: (QueryC f a, Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
+queryAll :: (QueryC f a, Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
 -- queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
 queryAll rules =
   mkQueryResultAll $ \goal ->
       runFreshT (querySubstAll emptySubst (map (fmap Left) rules) (map (fmap Right) goal))
 
-querySubst :: (QueryC f a) => Subst f a -> [Rule f a] -> f a -> FreshT [] (Subst f a)
+querySubst :: (Ppr [f a], QueryC f a) => Subst f a -> [Rule f a] -> f a -> FreshT [] (Subst f a)
 querySubst subst rules goal = do
   rule0 <- lift rules
 
   rule <- freshenRule rule0
 
   newSubst <-
-    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
   case
-      -- trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)) $
+      trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)) $
       map (applySubst newSubst) (ruleBody rule) of
     [] -> pure newSubst
     newGoals -> querySubstAll newSubst rules newGoals
 
-querySubstAll :: (QueryC f a) => Subst f a -> [Rule f a] -> [f a] -> FreshT [] (Subst f a)
+querySubstAll :: (Ppr [f a], QueryC f a) => Subst f a -> [Rule f a] -> [f a] -> FreshT [] (Subst f a)
 querySubstAll subst rules [] = pure subst
 querySubstAll subst rules (x:xs) = do
   newSubst <- querySubst subst rules x
@@ -258,7 +260,6 @@ freshenSubst initialSubst t = do
   let vars = toList t
   subst <- go vars
   pure subst
-  -- pure $ applySubst subst t
   where
     go :: [a] -> FreshT m (Subst f a)
     go [] = pure initialSubst
@@ -272,12 +273,6 @@ freshenSubst initialSubst t = do
     goVar v = do
       v' <- fresh v
       pure $ singleSubst v (pure v')
-    -- goVar v = (singleSubst v . _) <$> fresh v
-
-    -- goVar :: a -> a -> FreshT m (Subst f a)
-    -- goVar origV v
-    --   | v `elem` usedVars = goVar origV <$> fresh v
-    --   | otherwise         = singleSubst origV (mkVar v)
 
 data V = V String | UnifyV (Name String)
   deriving (Show, Eq)
@@ -297,7 +292,10 @@ instance VarC V where
       toUnify (V y) = UnifyV (Name y i)
       toUnify (UnifyV (Name y _)) = UnifyV (Name y i)
   fromDisjointName (Right y) = y
---
+
+instance IsString V where
+  fromString = V
+
 -- testKB :: [Rule V]
 -- testKB =
 --   [fact $ App (Const "f") (Const "a")
@@ -315,4 +313,4 @@ instance VarC V where
 --     ,App (Const "h") (Var (V "X"))
 --     ]
 --   ]
---
+
