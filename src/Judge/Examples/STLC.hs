@@ -137,17 +137,17 @@ instance Unify (Subst Meta) Meta where
   matchOne (Ctx Empty) (Ctx Empty) = Just []
   matchOne (Ctx (Extend ctx x a)) (Ctx (Extend ctx' x' a')) =
     Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
-  matchOne (Ctx (CtxV x)) y = matchOne x y
-  matchOne x (Ctx (CtxV y)) = matchOne x y
+  matchOne (Ctx (CtxV x)) y = matchOne' x y
+  matchOne x (Ctx (CtxV y)) = matchOne' x y
 
   matchOne (Tp Unit) (Tp Unit) = Just []
   matchOne (Tp (Arr a b)) (Tp (Arr a' b')) =
     Just [(Tp a, Tp a'), (Tp b, Tp b')]
-  matchOne (Tp (TyV x)) y = matchOne x y
-  matchOne x (Tp (TyV y)) = matchOne x y
+  matchOne (Tp (TyV x)) y = matchOne' x y
+  matchOne x (Tp (TyV y)) = matchOne' x y
 
-  matchOne (Tm (V x)) y = matchOne x y
-  matchOne x (Tm (V y)) = matchOne x y
+  matchOne (Tm (V x)) y = matchOne' x y
+  matchOne x (Tm (V y)) = matchOne' x y
   matchOne (Tm (App x y)) (Tm (App x' y')) =
     Just [(Tm x, Tm y), (Tm x', Tm y')]
   matchOne (Tm (Lam x body)) (Tm (Lam x' body')) =
@@ -175,6 +175,10 @@ instance Unify (Subst Meta) Meta where
   getChildren (Tm (Lam x body)) =
     [x, Tm body]
   getChildren (Tm MkUnit) = []
+
+matchOne' x@(MV {}) y = Just [(x, y)]
+matchOne' x y@(MV {}) = Just [(x, y)]
+matchOne' x y = matchOne x y
 
 tcRules :: [Rule Meta (Name L.V)]
 tcRules = map toDebruijnRule

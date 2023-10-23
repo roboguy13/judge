@@ -226,11 +226,11 @@ querySubst subst rules goal = do
   rule <- freshenRule rule0
 
   newSubst <-
-    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
   case
-      trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)) $
+      -- trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)) $
       map (applySubst newSubst) (ruleBody rule) of
     [] -> pure newSubst
     newGoals -> querySubstAll newSubst rules newGoals
