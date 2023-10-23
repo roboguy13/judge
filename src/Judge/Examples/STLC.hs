@@ -24,23 +24,24 @@ import Data.String
 import Control.Monad
 
 import Data.Maybe
+import Data.Void
 
 -- import Unbound.Generics.LocallyNameless
 
 import Bound
 
 data Type a = TyV a | Unit | Arr (Type a) (Type a)
-  deriving (Show, Functor, Foldable, Eq)
+  deriving (Show, Functor, Foldable, Eq, Generic1, Traversable)
 
 data Term a where
   V :: a -> Term a
   App :: Term a -> Term a -> Term a
   Lam :: a -> Term a -> Term a
   MkUnit :: Term a
-  deriving (Show, Functor, Foldable, Generic1, Eq)
+  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable)
 
-data Ctx a = CtxV a | Empty | Extend (Ctx a) a (Type a)
-  deriving (Show, Functor, Foldable, Generic1, Eq)
+data Ctx a = CtxV a | Empty | Extend (Ctx a) a (Type (Ctx a))
+  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable)
 
 data Meta a where
   MV :: a -> Meta a
@@ -50,7 +51,48 @@ data Meta a where
   Tm :: Term (Meta a) -> Meta a
   Tp :: Type (Meta a) -> Meta a
   Ctx :: Ctx (Meta a) -> Meta a
-  deriving (Show, Functor, Foldable, Generic1, Eq)
+  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable)
+
+instance Applicative Term where
+  pure = V
+  (<*>) = ap
+
+instance Monad Term where
+  return = pure
+  V x >>= f = f x
+  App x y >>= f = App (x >>= f) (y >>= f)
+  Lam x body >>= f = do
+    x' <- f x
+    Lam x' (body >>= f)
+  MkUnit >>= _ = MkUnit
+
+instance Applicative Type where
+  pure = TyV
+  (<*>) = ap
+
+instance Monad Type where
+  return = pure
+  TyV x >>= f = f x
+  Unit >>= _ = Unit
+  Arr x y >>= f = Arr (x >>= f) (y >>= f)
+
+instance Applicative Ctx where
+  pure = CtxV
+  (<*>) = ap
+
+instance Monad Ctx where
+  return = pure
+  CtxV x >>= f = f x
+  Empty >>= _ = Empty
+  Extend ctx x a >>= f = do
+    x' <- f x
+    let a' = a >>= (TyV . (>>= f)) -- TODO: Does this make sense?
+    Extend (ctx >>= f) x' a'
+
+-- instance Applicative Term where
+--   pure = V
+--   App f g <*> App x y = App (f <*> x) (g <*> y)
+--   Lam x 
 
   -- Tp :: Type (Meta a) -> Meta a
   -- Tm :: Term (Meta a) -> Meta a
@@ -118,6 +160,31 @@ instance Substitute Meta where
     HasType ctx t a ->
       HasType (fmap (applySubst subst) ctx) (fmap (applySubst subst) t) (fmap (applySubst subst) a)
 
+instance Unify Type where
+  type UConst Type = Void
+  mkVar = TyV
+  getVar (TyV x) = Just x
+  getVar _ = Nothing
+  getConst _ = Nothing
+
+instance Unify Term where
+  type UConst Term = Void
+  mkVar = V
+  getVar (V x) = Just x
+  getVar _ = Nothing
+  getConst _ = Nothing
+
+instance Unify Ctx where
+  type UConst Ctx = Void
+  mkVar = CtxV
+  getVar (CtxV x) = Just x
+  getVar _ = Nothing
+  getConst _ = Nothing
+
+instance Substitute Type
+instance Substitute Term
+instance Substitute Ctx
+
 
 -- TODO: Generate these kinds of instances with Generics
 instance Unify Meta where
@@ -164,7 +231,7 @@ instance Unify Meta where
   getChildren (HasType ctx t a) = [Ctx ctx, Tm t, Tp a]
 
   getChildren (Ctx Empty) = []
-  getChildren (Ctx (Extend ctx x a)) = [Ctx ctx, x, Tp a]
+  getChildren (Ctx (Extend ctx x a)) = [Ctx ctx, x] <> map (Tp . fmap Ctx) (getChildren a)
   getChildren (Ctx (CtxV x)) = [x]
 
   getChildren (Tp Unit) = []
@@ -204,7 +271,7 @@ empty :: Ctx (Meta String)
 empty = Empty
 
 extend :: (CtxC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Ctx (Meta String)
-extend ctx x a = Extend (toCtx ctx) (toMeta x) (toType a)
+extend ctx x a = Extend (toCtx ctx) (toMeta x) (fmap CtxV (toType a))
 
 lookup :: (CtxC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Meta String
 lookup ctx x a = Lookup (toCtx ctx) (toMeta x) (toType a)

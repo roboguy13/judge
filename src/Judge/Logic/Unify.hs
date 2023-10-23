@@ -33,7 +33,22 @@ data UnifyVar a = UnifyVar (Maybe a) Int
 
 -- TODO: Use unbound-generics?
 
-class (Substitute f, Eq (UConst f)) => Unify f where
+data Pair a = Pair a a deriving (Functor, Foldable, Traversable)
+
+instance Applicative Pair where
+  pure x = Pair x x
+  Pair f g <*> Pair x y = Pair (f x) (g y)
+
+distributePair :: (Applicative f, Traversable f) => f (a, a) -> (f a, f a)
+distributePair = fromPair . sequenceA . fmap toPair
+  where
+    toPair :: (a, a) -> Pair a
+    toPair = uncurry Pair
+
+    fromPair :: Pair a -> (a, a)
+    fromPair (Pair x y) = (x, y)
+
+class (Functor f, Substitute f, Eq (UConst f)) => Unify f where
   type UConst f
 
   getVar :: f a -> Maybe a
@@ -42,54 +57,80 @@ class (Substitute f, Eq (UConst f)) => Unify f where
   getConst :: f a -> Maybe (UConst f)
 
   matchOne :: f a -> f a -> Maybe [(f a, f a)] -- If the constructors match, give back the children for each
+  matchOneTree :: f a -> f a -> Maybe (f (a, a))
   getChildren :: f a -> [f a]
 
-  default matchOne :: (Generic1 f, Unify (Rep1 f)) => f a -> f a -> Maybe [(f a, f a)]
-  matchOne x y = map (bimap to1 to1) <$> matchOne (from1 x) (from1 y)
+  default matchOneTree :: (Generic1 f, GUnify (Rep1 f)) => f a -> f a -> Maybe (f (a, a))
+  matchOneTree x y = to1 <$> gmatchOne (from1 x) (from1 y)
 
-instance (Unify f) => Unify (M1 i c f) where
-  type UConst (M1 i c f) = UConst f
-  matchOne (M1 x) (M1 y) = map (bimap M1 M1) <$> matchOne x y
+  default matchOne :: (Generic1 f, GUnify (Rep1 f), Traversable f, Applicative f) => f a -> f a -> Maybe [(f a, f a)]
+  matchOne x y = fmap ((:[]) . distributePair . to1) $ gmatchOne (from1 x) (from1 y)
 
-instance Unify U1 where
-  type UConst U1 = Void
-  matchOne _ _ = Just []
+  default getChildren :: (Generic1 f, GUnify (Rep1 f)) => f a -> [f a]
+  getChildren = map to1 . ggetChildren . from1
 
-instance Eq c => Unify (K1 i c) where
-  type UConst (K1 i c) = ()
-  matchOne (K1 a) (K1 b)
-    | a == b = Just []
+class GUnify f where
+  gmatchOne :: f a -> f a -> Maybe (f (a, a))
+  ggetChildren :: f a -> [f a]
+
+instance (GUnify f) => GUnify (M1 i c f) where
+  gmatchOne (M1 x) (M1 y) = M1 <$> gmatchOne x y
+  ggetChildren (M1 x) = map M1 $ ggetChildren x
+
+instance GUnify U1 where
+  gmatchOne _ _ = Just U1
+  ggetChildren _ = []
+
+instance Eq c => GUnify (K1 i c) where
+  gmatchOne (K1 a) (K1 b)
+    | a == b = Just (K1 a)
     | otherwise = Nothing
 
-instance (Unify f, Unify g) => Unify (f :+: g) where
-  type UConst (f :+: g) = Either (UConst f) (UConst g)
-  matchOne (L1 x) (L1 y) = map (bimap L1 L1) <$> matchOne x y
-  matchOne (R1 x) (R1 y) = map (bimap R1 R1) <$> matchOne x y
-  matchOne _ _ = Nothing
+  ggetChildren _ = []
 
-instance (Unify f, Unify g) => Unify (f :*: g) where
-  type UConst (f :*: g) = (UConst f, UConst g)
-  matchOne (x :*: y) (x' :*: y') = do
-    a <- matchOne x x'
-    b <- matchOne y y'
-    pure $ zipWith go a b
+instance (GUnify f, GUnify g) => GUnify (f :+: g) where
+  gmatchOne (L1 x) (L1 y) = L1 <$> gmatchOne x y
+  gmatchOne (R1 x) (R1 y) = R1 <$> gmatchOne x y
+  gmatchOne _ _ = Nothing
+
+  ggetChildren (L1 x) = L1 <$> [x]
+  ggetChildren (R1 y) = R1 <$> [y]
+
+instance (GUnify f, GUnify g) => GUnify (f :*: g) where
+  gmatchOne (x :*: y) (x' :*: y') = do
+    a <- gmatchOne x x'
+    b <- gmatchOne y y'
+    pure (a :*: b)
+
+  ggetChildren (x :*: y) = zipWith (:*:) (ggetChildren x) (ggetChildren y)
+
+instance (forall z. Eq z => Eq (g z), Functor f, Applicative g, Unify f, Unify g) => GUnify (f :.: g) where
+  gmatchOne (Comp1 x) (Comp1 y) =
+    let z = Comp1 <$> matchOneTree x y
+    in
+    fmap go z
     where
-      go (p, q) (p', q') = (p :*: p', q :*: q')
+      go :: (f :.: ((,) (g a))) (g a) -> (f :.: g) (a, a)
+      go (Comp1 p) = Comp1 $ fmap (uncurry (liftA2 (,))) p
 
-instance (forall z. Eq z => Eq (g z), Applicative g, Unify f, Unify g) => Unify (f :.: g) where
-  type UConst (f :.: g) = UConst f
-  matchOne (Comp1 x) (Comp1 y) = map (bimap Comp1 Comp1) <$> matchOne x y
+  ggetChildren (Comp1 x) = Comp1 <$> getChildren x
 
-instance Unify Par1 where
-  type UConst Par1 = Void
-  matchOne (Par1 x) (Par1 y) = Just [(Par1 x, Par1 y)]
-
-instance (Unify f) => Unify (Rec1 f) where
+instance (Traversable f, Applicative f, Unify f) => Unify (Rec1 f) where
   type UConst (Rec1 f) = UConst f
-  matchOne (Rec1 a) (Rec1 b) = map (bimap Rec1 Rec1) <$> matchOne a b
+
+instance GUnify Par1 where
+  gmatchOne (Par1 x) (Par1 y) = Just $ Par1 (x, y)
+  ggetChildren _ = []
+
+instance (Unify f) => GUnify (Rec1 f) where
+  gmatchOne (Rec1 a) (Rec1 b) = Rec1 <$> matchOneTree a b
+  ggetChildren (Rec1 x) = Rec1 <$> getChildren x
 
 class Substitute f where
   applySubst :: Eq a => Subst f a -> f a -> f a
+
+  default applySubst :: (Eq a, Generic1 f, Substitute (Rep1 f)) => Subst f a -> f a -> f a
+  applySubst subst x = to1 $ applySubst (mapSubstRhs from1 subst) $ from1 x
 
 instance Substitute f => Substitute (M1 i c f) where
   applySubst subst (M1 x) = M1 $ applySubst (mapSubstRhs unM1 subst) x
@@ -111,6 +152,11 @@ instance (Substitute f, Substitute g) => Substitute (f :+: g) where
       go _ _ = Nothing
 
 instance (Substitute f, Substitute g) => Substitute (f :*: g) where
+  applySubst subst (x :*: y) =
+      applySubst (mapSubstRhs proj1 subst) x :*: applySubst (mapSubstRhs proj2 subst) y
+    where
+      proj1 (x :*: _) = x
+      proj2 (_ :*: y) = y
 
 instance (forall z. Eq z => Eq (g z), Applicative g, Substitute f, Substitute g) => Substitute (f :.: g) where
   applySubst subst (Comp1 x) = Comp1 $ applySubst (mapMaybeSubst go subst) x
@@ -119,8 +165,13 @@ instance (forall z. Eq z => Eq (g z), Applicative g, Substitute f, Substitute g)
       go a (Comp1 b) = Just (pure a, b)
 
 instance (Substitute f) => Substitute (Rec1 f) where
+  applySubst subst (Rec1 x) = Rec1 $ applySubst (mapSubstRhs unRec1 subst) x
+
 instance Substitute Par1 where
-  applySubst _ = id
+  applySubst subst (Par1 x) =
+    case substLookup subst x of
+      Nothing -> error "applySust"
+      Just y -> y
 
 newtype Subst f a = Subst [(a, f a)]
   deriving (Show, Functor, Foldable, Traversable)
