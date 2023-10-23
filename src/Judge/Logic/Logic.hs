@@ -99,25 +99,17 @@ instance (Ppr (f a), Ppr [f a]) => Ppr (Rule f a) where
 instance Ppr a => Ppr [LTerm a] where
   pprDoc = foldr (<+>) mempty . punctuate (text ",") . map pprDoc
 
-newtype Subst f a = Subst [(a, f a)]
-  deriving (Show, Functor, Foldable, Traversable)
+-- -- TODO: Use sets for Subst instead
+-- nubSubst :: (Eq a, Eq (f a)) => Subst f a -> Subst f a
+-- nubSubst (Subst xs) = Subst (nub xs)
 
--- TODO: Use sets for Subst instead
-nubSubst :: (Eq a, Eq (f a)) => Subst f a -> Subst f a
-nubSubst (Subst xs) = Subst (nub xs)
-
-instance (Eq a, Eq (f a), Ppr a, Ppr (f a)) => Ppr (Subst f a) where
-  pprDoc (Subst []) = "yes"
-  pprDoc (Subst xs0) = foldr1 ($$) (map go (nub xs0))
-    where
-      go (x, y) = pprDoc x <+> text "=" <+> pprDoc y
 
 class Solve a v | a -> v where
   toLTerm :: a -> LTerm v
   fromLTerm :: LTerm v -> a
 
-instance Unify (Subst LTerm) LTerm where
-  type UConst (Subst LTerm) LTerm = String
+instance Unify LTerm where
+  type UConst LTerm = String
 
   getVar (Var x) = Just x
   getVar _ = Nothing
@@ -137,9 +129,7 @@ instance Unify (Subst LTerm) LTerm where
   getChildren (App x y) = [x, y]
   getChildren _ = []
 
-instance Substitute (Subst LTerm) LTerm where
-  singleSubst x (Var y) | y == x = Subst []
-  singleSubst x t = Subst [(x, t)]
+instance Substitute LTerm where
   applySubst subst = \case
     Var x -> case substLookup subst x of
                Just t -> t
@@ -147,11 +137,6 @@ instance Substitute (Subst LTerm) LTerm where
     Const s -> Const s
     App x y -> App (applySubst subst x) (applySubst subst y)
 
-  combineSubst (Subst xs) (Subst ys) = Just $ Subst $ xs <> ys -- TODO: Is this ok?
-  emptySubst = Subst []
-  substLookup (Subst xs) v = lookup v xs
-  mapSubstRhs f (Subst xs) = Subst (map (fmap f) xs)
-  mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 
 data QueryResult f a =
   QueryResult
@@ -164,7 +149,7 @@ deriving instance (Show a, Show (f (Either (Name a) a))) => Show (QueryResult f 
 
 -- | Display the resulting `Subst`s in terms of the variables from the
 -- original query:
-queryDisplaySubsts :: forall f a b. (VarC a, Eq a, Unify (Subst f) f, Monad f) => QueryResult f a -> [Subst f a]
+queryDisplaySubsts :: forall f a b. (VarC a, Eq a, Unify f, Monad f) => QueryResult f a -> [Subst f a]
 queryDisplaySubsts qr =
     let results = queryResultSubsts qr
         initialResultSubst = map mkTheSubst results
@@ -190,7 +175,7 @@ queryDisplaySubsts qr =
 --           go :: a -> (a, f a)
 --           go x = (x, applySubst subst (mkVar x))
 
-type QueryC f a = (Ppr a, Eq a, VarC a, Unify (Subst f) f, Ppr (f a), Foldable f, Applicative f)
+type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Applicative f)
 
 mkQueryResult :: Foldable f => (f a -> [Subst f (Either (Name a) a)]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
@@ -241,7 +226,7 @@ querySubstAll subst rules (x:xs) = do
   newSubst <- querySubst subst rules x
   querySubstAll newSubst rules xs
 
-freshenRule :: forall m f a. (Foldable f, Unify (Subst f) f, Applicative f, Monad m, VarC a, Eq a) => Rule f a -> FreshT m (Rule f a)
+freshenRule :: forall m f a. (Foldable f, Unify f, Applicative f, Monad m, VarC a, Eq a) => Rule f a -> FreshT m (Rule f a)
 freshenRule (x :- xs) = do
   subst <- freshenSubsts emptySubst (x : xs)
   pure $ applySubst subst x :- map (applySubst subst) xs
@@ -249,13 +234,13 @@ freshenRule (x :- xs) = do
 -- -- freshenRule (x :- xs) =
 --   -- liftA2 (:-) (freshen x) (traverse freshen xs)
 
-freshenSubsts :: forall m f a. (Monad m, Applicative f, Unify (Subst f) f, Substitute (Subst f) f, VarC a, Eq a, Foldable f) => Subst f a -> [f a] -> FreshT m (Subst f a)
+freshenSubsts :: forall m f a. (Monad m, Applicative f, Unify f, Substitute f, VarC a, Eq a, Foldable f) => Subst f a -> [f a] -> FreshT m (Subst f a)
 freshenSubsts subst [] = pure subst
 freshenSubsts subst (x:xs) = do
   subst' <- freshenSubst subst x
   freshenSubsts subst' xs
 
-freshenSubst :: forall m f a. (Monad m, Applicative f, Unify (Subst f) f, Substitute (Subst f) f, VarC a, Eq a, Foldable f) => Subst f a -> f a -> FreshT m (Subst f a)
+freshenSubst :: forall m f a. (Monad m, Applicative f, Unify f, Substitute f, VarC a, Eq a, Foldable f) => Subst f a -> f a -> FreshT m (Subst f a)
 freshenSubst initialSubst t = do
   let vars = toList t
   subst <- go vars

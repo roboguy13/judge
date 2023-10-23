@@ -97,10 +97,7 @@ instance Ppr a => Ppr [Meta a] where
   pprDoc xs =
     text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
 
-instance Substitute (Subst Meta) Meta where
-  singleSubst x (MV y) | y == x = Subst []
-  singleSubst x y = Subst [(x, y)]
-
+instance Substitute Meta where
   applySubst subst = \case
     MV x -> case substLookup subst x of
               Just t -> t
@@ -110,15 +107,10 @@ instance Substitute (Subst Meta) Meta where
     HasType ctx t a ->
       HasType (fmap (applySubst subst) ctx) (fmap (applySubst subst) t) (fmap (applySubst subst) a)
 
-  combineSubst (Subst xs) (Subst ys) = Just $ Subst $ xs <> ys
-  emptySubst = Subst []
-  substLookup (Subst xs) v = lookup v xs
-  mapSubstRhs f (Subst xs) = Subst (map (fmap f) xs)
-  mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 
 -- TODO: Generate these kinds of instances with Generics
-instance Unify (Subst Meta) Meta where
-  type UConst (Subst Meta) Meta = String
+instance Unify Meta where
+  type UConst Meta = String
 
   getVar (MV x) = Just x
   getVar _ = Nothing
@@ -203,5 +195,10 @@ tcRules = map toDebruijnRule
 
 test1 =
   query tcRules
-   $ HasType Empty MkUnit Unit
+    $ HasType Empty MkUnit Unit
+
+test2 =
+  query tcRules
+    $ HasType Empty (Lam (MV "x") MkUnit) (TyV (MV "a"))
+        
 
