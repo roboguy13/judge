@@ -197,7 +197,7 @@ instance Substitute Type where
       go x =
         case substLookup subst x of
           Just r -> r
-          Nothing -> error $ "Type applySubst: " ++ show x
+          Nothing -> TyV x --error $ "Type applySubst: " ++ show x
 
 instance Substitute Term where
   applySubst subst = (>>= go)
@@ -205,7 +205,7 @@ instance Substitute Term where
       go x =
         case substLookup subst x of
           Just r -> r
-          Nothing -> error $ "Term applySubst: " ++ show x
+          Nothing -> V x --error $ "Term applySubst: " ++ show x
 
 instance Substitute Meta_ where
   applySubst subst = (>>= go)
@@ -213,7 +213,7 @@ instance Substitute Meta_ where
       go x =
         case substLookup subst x of
           Just r -> r
-          Nothing -> error $ "Meta_ applySubst: " ++ show x ++ "\n^--> " ++ show subst
+          Nothing -> MV x --error $ "Meta_ applySubst: " ++ show x ++ "\n^--> " ++ show subst
   -- applySubst subst = \case
   --   MV x -> case substLookup subst x of
   --             Just t -> t

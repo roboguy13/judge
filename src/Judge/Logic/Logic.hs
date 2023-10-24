@@ -222,6 +222,8 @@ querySubst subst rules goal = do
     -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
+  -- () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst)
+
   case
       -- trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst) $
       map (applySubst newSubst) (ruleBody rule) of
