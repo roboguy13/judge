@@ -397,6 +397,17 @@ tcRules = map (toDebruijnRule . fmap L.V)
     ]
   ]
 
+inferType :: Term L.V -> Maybe (Type L.V)
+inferType t = do
+  subst <- getFirstQueryResultSubst $ query tcRules $ hasType empty (tm t) (mv (L.V "a"))
+  case applySubst subst $ mv (Right (L.V "a")) of
+    Meta (Tp a) -> traverse go a
+    Meta (MV _) -> Nothing
+    x -> error $ "inferType: " ++ show x
+  where
+    go (MV (Right x)) = Just x
+    go _ = Nothing
+
 test1 =
   query tcRules
     $ hasType empty (tm MkUnit) (tp Unit)

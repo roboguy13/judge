@@ -199,6 +199,12 @@ mkQueryResultAll f goal =
   , queryResultSubsts = f goal
   }
 
+getFirstQueryResultSubst :: QueryResult f a -> Maybe (Subst f (Either (Name a) a))
+getFirstQueryResultSubst qr =
+  case queryResultSubsts qr of
+    (x:_) -> Just x
+    [] -> Nothing
+
 query :: (QueryC f a, Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 query rules =
