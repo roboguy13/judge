@@ -8,9 +8,11 @@ import Data.Bifunctor
 import Control.Monad.State
 import Control.Monad.Identity
 
+import Data.Data
+
 -- Names with uniques
 
-data Name a = Name a Int deriving (Show, Eq)
+data Name a = Name a Int deriving (Show, Eq, Data)
 
 -- instance Eq (Name a) where
 --   Name _ i == Name _ j = i == j

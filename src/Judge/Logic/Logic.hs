@@ -18,8 +18,12 @@ import Data.Foldable
 
 import Data.String
 
+import Data.Data
+
 import Control.Monad
 import Control.Applicative hiding (Const)
+
+import Control.Lens.Plated
 
 import Control.Monad.Morph
 
@@ -31,7 +35,7 @@ data LTerm a
   = Var a
   | Const String
   | App (LTerm a) (LTerm a)
-  deriving (Show, Eq, Foldable, Traversable, Functor, Generic, Generic1)
+  deriving (Show, Eq, Foldable, Traversable, Functor, Generic, Generic1, Data)
 
 instance Applicative LTerm where
   pure = Var
@@ -110,6 +114,8 @@ class Solve a v | a -> v where
   toLTerm :: a -> LTerm v
   fromLTerm :: LTerm v -> a
 
+instance Data a => Plated (LTerm a)
+
 instance Unify LTerm where
   type UConst LTerm = String
 
@@ -128,8 +134,8 @@ instance Unify LTerm where
   -- matchOne (App x y) (App x' y') = Just [(x, x'), (y, y')]
   -- -- matchOne _ _ = Nothing
 
-  getChildren (App x y) = [x, y]
-  getChildren _ = []
+  -- getChildren (App x y) = [x, y]
+  -- getChildren _ = []
 
 instance Substitute LTerm where
   applySubst subst = \case
@@ -177,7 +183,7 @@ queryDisplaySubsts qr =
 --           go :: a -> (a, f a)
 --           go x = (x, applySubst subst (mkVar x))
 
-type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Applicative f)
+type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Applicative f, Plated (f a), Data a)
 
 mkQueryResult :: Foldable f => (f a -> [Subst f (Either (Name a) a)]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
@@ -193,14 +199,14 @@ mkQueryResultAll f goal =
   , queryResultSubsts = f goal
   }
 
-query :: (QueryC f a, Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
+query :: (QueryC f a, Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 query rules =
   mkQueryResult $ \goal ->
       runFreshT (querySubst emptySubst (map (fmap Left) rules) (fmap Right goal))
 
 
-queryAll :: (QueryC f a, Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
+queryAll :: (QueryC f a, Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
 -- queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
 queryAll rules =
   mkQueryResultAll $ \goal ->
@@ -262,7 +268,7 @@ freshenSubst initialSubst t = do
       pure $ singleSubst v (pure v')
 
 data V = V String | UnifyV (Name String)
-  deriving (Show, Eq)
+  deriving (Show, Eq, Data)
 
 instance Ppr V where
   pprDoc (V x) = text "?" <.> pprDoc x

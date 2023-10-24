@@ -19,6 +19,8 @@ import Judge.Logic.Name
 
 import GHC.Generics hiding (Meta)
 
+import Data.Data
+
 import Data.String
 
 import Control.Monad
@@ -26,22 +28,24 @@ import Control.Monad
 import Data.Maybe
 import Data.Void
 
+import Control.Lens.Plated
+
 -- import Unbound.Generics.LocallyNameless
 
 import Bound
 
 data Type a = TyV a | Unit | Arr (Type a) (Type a)
-  deriving (Show, Functor, Foldable, Eq, Generic1, Traversable)
+  deriving (Show, Functor, Foldable, Eq, Generic1, Traversable, Data)
 
 data Term a where
   V :: a -> Term a
   App :: Term a -> Term a -> Term a
   Lam :: a -> Term a -> Term a
   MkUnit :: Term a
-  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable)
+  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
 
 data Ctx a = CtxV a | Empty | Extend (Ctx a) a (Type (Ctx a))
-  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable)
+  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
 
 data Meta a where
   MV :: a -> Meta a
@@ -51,7 +55,16 @@ data Meta a where
   Tm :: Term (Meta a) -> Meta a
   Tp :: Type (Meta a) -> Meta a
   Ctx :: Ctx (Meta a) -> Meta a
-  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable)
+  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
+
+instance Data a => Plated (Type a)
+instance Data a => Plated (Term a)
+instance Data a => Plated (Ctx a)
+instance Plated (Meta a) where
+  plate f (MV x) = pure (MV x)
+  plate f (Lookup ctx x a) =
+    Lookup <$> fmap CtxV (f (Ctx ctx)) <*> f x <*> fmap TyV (f (Tp a))
+  plate f (Tm x) = Tm _
 
 instance Applicative Term where
   pure = V

@@ -22,7 +22,12 @@ import Data.Maybe
 
 import GHC.Generics
 
+import Control.Lens.Plated
+import Control.Lens hiding (getConst)
+
 import Control.Applicative hiding (Const, getConst)
+
+import Data.Data
 
 import Data.Void
 
@@ -58,141 +63,19 @@ class (Functor f, Substitute f, Eq (UConst f)) => Unify f where
 
   getConst :: f a -> Maybe (UConst f)
 
-  matchOne :: f a -> f a -> Maybe [(f a, f a)] -- If the constructors match, give back the children for each
+  matchOne :: Data a => f a -> f a -> Maybe [(f a, f a)] -- If the constructors match, give back the children for each
   -- matchOneTree :: f a -> f a -> Maybe (f (a, a))
-  getChildren :: f a -> [f a]
+
+  -- getChildren :: f a -> [f a] -- TODO: Just use Control.Lens.Plated for this
 
   -- default matchOneTree :: (Generic1 f, GUnify (Rep1 f)) => f a -> f a -> Maybe (f (a, a))
   -- matchOneTree x y = to1 <$> gmatchOne (from1 x) (from1 y)
 
-  default matchOne :: (Generic1 f, GUnifySum (Rep1 f), Traversable f, Applicative f) => f a -> f a -> Maybe [(f a, f a)]
-  matchOne x y = fmap (map (bimap to1 to1)) $ gSumMatchOne (from1 x) (from1 y)
-
-  default getChildren :: (Generic1 f, GUnifySum (Rep1 f)) => f a -> [f a]
-  getChildren = map to1 . gSumGetChildren . from1
-
-class GUnifySum f where
-  gSumMatchOne :: f a -> f a -> Maybe [(f a, f a)]
-  gSumGetChildren :: f a -> [f a]
-
-class GUnifyProduct f where
-  gProductMatchOne :: f a -> f a -> Maybe [(f a, f a)]
-  gProductGetChildren :: f a -> [f a]
-
-instance (GUnifySum f) => GUnifySum (M1 i c f) where
-  gSumMatchOne (M1 x) (M1 y) = map (bimap M1 M1) <$> gSumMatchOne x y
-  gSumGetChildren (M1 x) = map M1 $ gSumGetChildren x
-
-instance GUnifySum U1 where
-  gSumMatchOne _ _ = Just [(U1, U1)]
-  gSumGetChildren _ = []
-
-instance Eq c => GUnifySum (K1 i c) where
-  gSumMatchOne (K1 a) (K1 b)
-    | a == b = Just [(K1 a, K1 b)]
-    | otherwise = Nothing
-
-  gSumGetChildren _ = []
-
-instance (GUnifyProduct f, GUnifySum (g :+: h)) => GUnifySum (f :+: (g :+: h)) where
-  gSumMatchOne (L1 x) (L1 y) = --map (bimap L1 L1) <$> gProductMatchOne x y
-    let a = gProductGetChildren x
-        b = gProductGetChildren y
-        ab = zip a b
-    in
-    Just $ map (bimap L1 L1) ab
-  gSumMatchOne (R1 x) (R1 y) = map (bimap R1 R1) <$> gSumMatchOne x y
-  gSumMatchOne _ _ = Nothing
-
-  gSumGetChildren (L1 x) = L1 <$> gProductGetChildren x
-  gSumGetChildren (R1 y) = R1 <$> gSumGetChildren y
-
-instance (GUnifyProduct f, GUnifyProduct (g :*: h)) => GUnifySum (f :+: (g :*: h)) where
-  gSumMatchOne (L1 x) (L1 y) = --map (bimap L1 L1) <$> gProductMatchOne x y
-    let a = gProductGetChildren x
-        b = gProductGetChildren y
-        ab = zip a b
-    in
-    Just $ map (bimap L1 L1) ab
-  gSumMatchOne (R1 x) (R1 y) = --map (bimap R1 R1) <$> gProductMatchOne x y
-    let a = gProductGetChildren x
-        b = gProductGetChildren y
-        ab = zip a b
-    in
-    Just $ map (bimap R1 R1) ab
-  gSumMatchOne _ _ = Nothing
-
-  gSumGetChildren (L1 x) = L1 <$> gProductGetChildren x
-  gSumGetChildren (R1 y) = R1 <$> gProductGetChildren y
-
-instance (GUnifyProduct f, GUnifyProduct g) => GUnifySum (f :*: g) where
-  gSumMatchOne _ _ = Nothing --gProductMatchOne
-  gSumGetChildren (x :*: y) = zipWith (:*:) (gProductGetChildren x) (gProductGetChildren y)
-
-instance (GUnifyProduct f, GUnifySum g) => GUnifySum (f :+: (M1 i c g)) where
-  gSumMatchOne (L1 x) (L1 y) = map (bimap L1 L1) <$> gProductMatchOne x y
-  gSumMatchOne (R1 x) (R1 y) = map (bimap R1 R1) <$> gSumMatchOne x y
-  gSumMatchOne _ _ = Nothing
-
-  gSumGetChildren (L1 x) = L1 <$> gProductGetChildren x
-  gSumGetChildren (R1 y) = R1 <$> gSumGetChildren y
-
-instance (GUnifyProduct f) => GUnifyProduct (M1 i c f) where
-  gProductMatchOne (M1 x) (M1 y) = map (bimap M1 M1) <$> gProductMatchOne x y
-  gProductGetChildren (M1 x) = map M1 $ gProductGetChildren x
-
-instance GUnifyProduct U1 where
-  gProductMatchOne _ _ = Just [(U1, U1)]
-  gProductGetChildren _ = []
-
-instance Eq c => GUnifyProduct (K1 i c) where
-  gProductMatchOne (K1 a) (K1 b) = Just [(K1 a, K1 b)]
-  gProductGetChildren _ = []
-
-instance GUnifyProduct Par1 where
-  gProductMatchOne (Par1 x) (Par1 y) = Just [(Par1 x, Par1 y)]
-  gProductGetChildren _ = []
-
-instance (Unify f) => GUnifyProduct (Rec1 f) where
-  gProductMatchOne (Rec1 a) (Rec1 b) = map (bimap Rec1 Rec1) <$> matchOne a b
-  gProductGetChildren (Rec1 x) = Rec1 <$> getChildren x
-
--- instance (GUnifyProduct f, GUnifyProduct g) => GUnifyProduct (f :*: g) where
---   gProductMatchOne (x :*: y) (x' :*: y') = do
---     a <- map (uncurry (:*:)) <$> gProductMatchOne x x'
---     b <- map (uncurry (:*:)) <$> gProductMatchOne y y'
---     _
-
---
--- instance (GUnify f, GUnify g) => GUnify (f :*: g) where
---   gmatchOne (x :*: y) (x' :*: y') = do
---     a <- gmatchOne x x'
---     b <- gmatchOne y y'
---     pure (a :*: b)
---
---   ggetChildren (x :*: y) = zipWith (:*:) (ggetChildren x) (ggetChildren y)
---
--- instance (forall z. Eq z => Eq (g z), Functor f, Applicative g, Unify f, Unify g) => GUnify (f :.: g) where
---   gmatchOne (Comp1 x) (Comp1 y) =
---     let z = Comp1 <$> matchOneTree x y
---     in
---     fmap go z
---     where
---       go :: (f :.: ((,) (g a))) (g a) -> (f :.: g) (a, a)
---       go (Comp1 p) = Comp1 $ fmap (uncurry (liftA2 (,))) p
---
---   ggetChildren (Comp1 x) = Comp1 <$> getChildren x
---
--- instance (Traversable f, Applicative f, Unify f) => Unify (Rec1 f) where
---   type UConst (Rec1 f) = UConst f
---
--- instance GUnify Par1 where
---   gmatchOne (Par1 x) (Par1 y) = Just $ Par1 (x, y)
---   ggetChildren _ = []
---
--- instance (Unify f) => GUnify (Rec1 f) where
---   gmatchOne (Rec1 a) (Rec1 b) = Rec1 <$> matchOneTree a b
---   ggetChildren (Rec1 x) = Rec1 <$> getChildren x
+  default matchOne :: (Data (f a), Plated (f a)) => f a -> f a -> Maybe [(f a, f a)]
+  matchOne x y =
+    if toConstr x == toConstr y
+    then Just $ zip (children x) (children y)
+    else Nothing
 
 class Substitute f where
   applySubst :: Eq a => Subst f a -> f a -> f a
@@ -284,7 +167,7 @@ mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 --         Just y -> y
 --   | otherwise = 
 
-type UnifyC f a = (Ppr a, Eq a, Unify f, Traversable f)
+type UnifyC f a = (Ppr a, Eq a, Unify f, Traversable f, Plated (f a), Data a)
 
 applyDisjointSubst_Right :: (Substitute f, Traversable f, Eq b) =>
   Subst f (Either a b) -> f b -> f b
@@ -379,13 +262,13 @@ combineSubsts xs = foldr combine (Just emptySubst) xs
 unify :: forall f a. (Ppr (f a), UnifyC f a) => f a -> f a -> Maybe (Subst f a)
 unify = unifySubst emptySubst
 
-unifySubstDisjoint :: forall f a b. (Ppr (f (Either b a)), UnifyC f a, UnifyC f b, Monad f, Traversable f) =>
+unifySubstDisjoint :: forall f a b. (Ppr (f (Either b a)), Plated (f (Either b a)), UnifyC f a, UnifyC f b, Monad f, Traversable f) =>
   Subst f a -> f a -> f b -> Maybe (Subst f a)
 unifySubstDisjoint subst x y = do
     subst' <- unifySubstDisjoint' (toDisjointSubst_Right subst) x y
     pure $ simplifyDisjointSubst subst subst'
 
-unifySubstDisjoint' :: forall f a b. (Ppr (f (Either b a)), UnifyC f a, UnifyC f b, Functor f) =>
+unifySubstDisjoint' :: forall f a b. (Ppr (f (Either b a)), Plated (f (Either b a)), UnifyC f a, UnifyC f b, Functor f) =>
   Subst f (Either b a) -> f a -> f b -> Maybe (Subst f (Either b a))
 unifySubstDisjoint' subst x y = unifySubst subst (fmap Right x) (fmap Left y)
 
@@ -439,9 +322,9 @@ unifyVar subst xV y
   | otherwise =
       extendSubst subst xV y
 
-occursCheck :: (UnifyC f a, Eq a) => a -> f a -> Bool
+occursCheck :: (UnifyC f a, Eq a, Plated (f a)) => a -> f a -> Bool
 occursCheck v x
   | not doOccursCheck = False
   | Just xV <- getVar x = xV == v
-  | otherwise = any (occursCheck v) $ getChildren x
+  | otherwise = any (occursCheck v) $ children x
 
