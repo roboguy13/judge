@@ -191,6 +191,9 @@ instance Unify Meta where
   type UConst Meta = String
 
   getVar (MV x) = Just x
+  getVar (Tm x) = getVar =<< getVar x
+  getVar (Tp x) = getVar =<< getVar x
+  getVar (Ctx x) = getVar =<< getVar x
   getVar _ = Nothing
 
   mkVar = MV
@@ -225,30 +228,30 @@ instance Unify Meta where
   -- matchOne (Tm MkUnit) (Tm MkUnit) = Just []
   -- matchOne _ _ = Nothing
   --
-  getChildren (MV {}) = []
-  getChildren (Lookup ctx x a) = [Ctx ctx, x, Tp a]
+  -- getChildren (MV {}) = []
+  -- getChildren (Lookup ctx x a) = [Ctx ctx, x, Tp a]
+  --
+  -- getChildren (HasType ctx t a) = [Ctx ctx, Tm t, Tp a]
+  --
+  -- getChildren (Ctx Empty) = []
+  -- getChildren (Ctx (Extend ctx x a)) = [Ctx ctx, x] <> map (Tp . fmap Ctx) (getChildren a)
+  -- getChildren (Ctx (CtxV x)) = [x]
+  --
+  -- getChildren (Tp Unit) = []
+  -- getChildren (Tp (Arr a b)) =
+  --   [Tp a, Tp b]
+  -- getChildren (Tp (TyV x)) = [x]
+  --
+  -- getChildren (Tm (V x)) = [x]
+  -- getChildren (Tm (App x y)) =
+  --   [Tm x, Tm y]
+  -- getChildren (Tm (Lam x body)) =
+  --   [x, Tm body]
+  -- getChildren (Tm MkUnit) = []
 
-  getChildren (HasType ctx t a) = [Ctx ctx, Tm t, Tp a]
-
-  getChildren (Ctx Empty) = []
-  getChildren (Ctx (Extend ctx x a)) = [Ctx ctx, x] <> map (Tp . fmap Ctx) (getChildren a)
-  getChildren (Ctx (CtxV x)) = [x]
-
-  getChildren (Tp Unit) = []
-  getChildren (Tp (Arr a b)) =
-    [Tp a, Tp b]
-  getChildren (Tp (TyV x)) = [x]
-
-  getChildren (Tm (V x)) = [x]
-  getChildren (Tm (App x y)) =
-    [Tm x, Tm y]
-  getChildren (Tm (Lam x body)) =
-    [x, Tm body]
-  getChildren (Tm MkUnit) = []
-
-matchOne' x@(MV {}) y = Just [(x, y)]
-matchOne' x y@(MV {}) = Just [(x, y)]
-matchOne' x y = matchOne x y
+-- matchOne' x@(MV {}) y = Just [(x, y)]
+-- matchOne' x y@(MV {}) = Just [(x, y)]
+-- matchOne' x y = matchOne x y
 
 class MetaC a where toMeta :: a -> Meta String
 class TypeC a where toType :: a -> Type (Meta String)

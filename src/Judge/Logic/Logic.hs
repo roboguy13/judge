@@ -177,7 +177,7 @@ queryDisplaySubsts qr =
 --           go :: a -> (a, f a)
 --           go x = (x, applySubst subst (mkVar x))
 
-type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Applicative f)
+type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Applicative f)
 
 mkQueryResult :: Foldable f => (f a -> [Subst f (Either (Name a) a)]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
@@ -213,11 +213,11 @@ querySubst subst rules goal = do
   rule <- freshenRule rule0
 
   newSubst <-
-    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
   case
-      -- trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)) $
+      trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)) $
       map (applySubst newSubst) (ruleBody rule) of
     [] -> pure newSubst
     newGoals -> querySubstAll newSubst rules newGoals
