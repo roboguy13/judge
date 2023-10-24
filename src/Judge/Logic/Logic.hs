@@ -157,7 +157,7 @@ deriving instance (Show a, Show (f (Either (Name a) a))) => Show (QueryResult f 
 
 -- | Display the resulting `Subst`s in terms of the variables from the
 -- original query:
-queryDisplaySubsts :: forall f a b. (VarC a, Eq a, Unify f, Monad f) => QueryResult f a -> [Subst f a]
+queryDisplaySubsts :: forall f a b. (Show a, VarC a, Eq a, Unify f, Monad f) => QueryResult f a -> [Subst f a]
 queryDisplaySubsts qr =
     let results = queryResultSubsts qr
         initialResultSubst = map mkTheSubst results
@@ -183,7 +183,7 @@ queryDisplaySubsts qr =
 --           go :: a -> (a, f a)
 --           go x = (x, applySubst subst (mkVar x))
 
-type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Applicative f, Plated (f a), Data a)
+type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Applicative f, Plated (f a), Data a, Show a)
 
 mkQueryResult :: Foldable f => (f a -> [Subst f (Either (Name a) a)]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
@@ -199,42 +199,42 @@ mkQueryResultAll f goal =
   , queryResultSubsts = f goal
   }
 
-query :: (QueryC f a, Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
+query :: (QueryC f a, Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 query rules =
   mkQueryResult $ \goal ->
       runFreshT (querySubst emptySubst (map (fmap Left) rules) (fmap Right goal))
 
 
-queryAll :: (QueryC f a, Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
+queryAll :: (QueryC f a, Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
 -- queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
 queryAll rules =
   mkQueryResultAll $ \goal ->
       runFreshT (querySubstAll emptySubst (map (fmap Left) rules) (map (fmap Right) goal))
 
-querySubst :: (Ppr [f a], QueryC f a) => Subst f a -> [Rule f a] -> f a -> FreshT [] (Subst f a)
+querySubst :: (Ppr [f a], QueryC f a, Eq (f a)) => Subst f a -> [Rule f a] -> f a -> FreshT [] (Subst f a)
 querySubst subst rules goal = do
   rule0 <- lift rules
 
   rule <- freshenRule rule0
 
   newSubst <-
-    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
   case
-      trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)) $
+      -- trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst) $
       map (applySubst newSubst) (ruleBody rule) of
     [] -> pure newSubst
     newGoals -> querySubstAll newSubst rules newGoals
 
-querySubstAll :: (Ppr [f a], QueryC f a) => Subst f a -> [Rule f a] -> [f a] -> FreshT [] (Subst f a)
+querySubstAll :: (Ppr [f a], QueryC f a, Eq (f a)) => Subst f a -> [Rule f a] -> [f a] -> FreshT [] (Subst f a)
 querySubstAll subst rules [] = pure subst
 querySubstAll subst rules (x:xs) = do
   newSubst <- querySubst subst rules x
   querySubstAll newSubst rules xs
 
-freshenRule :: forall m f a. (Foldable f, Unify f, Applicative f, Monad m, VarC a, Eq a) => Rule f a -> FreshT m (Rule f a)
+freshenRule :: forall m f a. (Show a, Ppr a, Eq (f a), Ppr (f a), Foldable f, Unify f, Applicative f, Monad m, VarC a, Eq a) => Rule f a -> FreshT m (Rule f a)
 freshenRule (x :- xs) = do
   subst <- freshenSubsts emptySubst (x : xs)
   pure $ applySubst subst x :- map (applySubst subst) xs
@@ -242,15 +242,15 @@ freshenRule (x :- xs) = do
 -- -- freshenRule (x :- xs) =
 --   -- liftA2 (:-) (freshen x) (traverse freshen xs)
 
-freshenSubsts :: forall m f a. (Monad m, Applicative f, Unify f, Substitute f, VarC a, Eq a, Foldable f) => Subst f a -> [f a] -> FreshT m (Subst f a)
+freshenSubsts :: forall m f a. (Show a, Monad m, Applicative f, Unify f, Substitute f, VarC a, Eq a, Foldable f) => Subst f a -> [f a] -> FreshT m (Subst f a)
 freshenSubsts subst [] = pure subst
 freshenSubsts subst (x:xs) = do
   subst' <- freshenSubst subst x
   freshenSubsts subst' xs
 
-freshenSubst :: forall m f a. (Monad m, Applicative f, Unify f, Substitute f, VarC a, Eq a, Foldable f) => Subst f a -> f a -> FreshT m (Subst f a)
+freshenSubst :: forall m f a. (Show a, Monad m, Applicative f, Unify f, Substitute f, VarC a, Eq a, Foldable f) => Subst f a -> f a -> FreshT m (Subst f a)
 freshenSubst initialSubst t = do
-  let vars = toList t
+  let vars = nub $ toList t
   subst <- go vars
   pure subst
   where

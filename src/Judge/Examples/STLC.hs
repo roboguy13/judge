@@ -3,6 +3,8 @@
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE FunctionalDependencies #-}
 
 module Judge.Examples.STLC
   where
@@ -20,6 +22,7 @@ import Judge.Logic.Name
 import GHC.Generics hiding (Meta)
 
 import Data.Data
+import Data.Bifunctor
 
 import Data.String
 
@@ -27,6 +30,7 @@ import Control.Monad
 
 import Data.Maybe
 import Data.Void
+import Data.Coerce
 
 import Control.Lens.Plated
 
@@ -44,28 +48,45 @@ data Term a where
   MkUnit :: Term a
   deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
 
-data Ctx a = CtxV a | Empty | Extend (Ctx a) a (Type (Ctx a))
+-- data Ctx a = CtxV a | Empty | Extend (Ctx a) a (Type (Ctx a))
+--   deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
+
+data Meta_ a where
+  MV :: a -> Meta_ a
+  Lookup :: Meta_ a -> Meta_ a -> Meta_ a -> Meta_ a
+  HasType :: Meta_ a -> Meta_ a -> Meta_ a -> Meta_ a
+
+  Empty :: Meta_ a
+  Extend :: Meta_ a -> Meta_ a -> Meta_ a -> Meta_ a
+  Tp :: Type (Meta_ a) -> Meta_ a
+  Tm :: Term (Meta_ a) -> Meta_ a
   deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
 
-data Meta a where
-  MV :: a -> Meta a
-  Lookup :: Ctx (Meta a) -> Meta a -> Type (Meta a) -> Meta a
-  HasType :: Ctx (Meta a) -> Term (Meta a) -> Type (Meta a) -> Meta a
+data MSort = MJudgment | MCtx | MTp | MTm | MName
 
-  Tm :: Term (Meta a) -> Meta a
-  Tp :: Type (Meta a) -> Meta a
-  Ctx :: Ctx (Meta a) -> Meta a
-  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
+newtype Meta t a = Meta { unMeta :: Meta_ a }
+  deriving (Functor, Applicative, Substitute, Unify, Monad, Foldable, Eq, Traversable)
+
+instance Show a => Show (Meta t a) where show (Meta x) = show x
+
+instance Data a => Plated (Meta t a) where
+  plate :: forall f. Applicative f => (Meta t a -> f (Meta t a)) -> Meta t a -> f (Meta t a)
+  plate f (Meta x) =
+    let f' :: Meta_ a -> f (Meta_ a)
+        f' = fmap unMeta . f . Meta
+    in
+    Meta <$> plate f' x
+instance Data a => Plated (Meta_ a)
 
 instance Data a => Plated (Type a)
 instance Data a => Plated (Term a)
-instance Data a => Plated (Ctx a)
-instance Plated (Meta a) where
-  plate f (MV x) = pure (MV x)
-  plate f (Lookup ctx x a) =
-    Lookup <$> fmap CtxV (f (Ctx ctx)) <*> f x <*> fmap TyV (f (Tp a))
-  plate f (Tm x) = Tm _
-
+-- instance Data a => Plated (Ctx a)
+-- instance Plated (Meta a) where
+--   plate f (MV x) = pure (MV x)
+--   plate f (Lookup ctx x a) =
+--     Lookup <$> fmap CtxV (f (Ctx ctx)) <*> f x <*> fmap TyV (f (Tp a))
+--   plate f (Tm x) = Tm _
+--
 instance Applicative Term where
   pure = V
   (<*>) = ap
@@ -89,18 +110,18 @@ instance Monad Type where
   Unit >>= _ = Unit
   Arr x y >>= f = Arr (x >>= f) (y >>= f)
 
-instance Applicative Ctx where
-  pure = CtxV
-  (<*>) = ap
+-- instance Applicative Ctx where
+--   pure = CtxV
+--   (<*>) = ap
 
-instance Monad Ctx where
-  return = pure
-  CtxV x >>= f = f x
-  Empty >>= _ = Empty
-  Extend ctx x a >>= f = do
-    x' <- f x
-    let a' = a >>= (TyV . (>>= f)) -- TODO: Does this make sense?
-    Extend (ctx >>= f) x' a'
+-- instance Monad Ctx where
+--   return = pure
+--   CtxV x >>= f = f x
+--   Empty >>= _ = Empty
+--   Extend ctx x a >>= f = do
+--     x' <- f x
+--     let a' = a >>= (TyV . (>>= f)) -- TODO: Does this make sense?
+--     Extend (ctx >>= f) x' a'
 
 -- instance Applicative Term where
 --   pure = V
@@ -109,29 +130,34 @@ instance Monad Ctx where
 
   -- Tp :: Type (Meta a) -> Meta a
   -- Tm :: Term (Meta a) -> Meta a
-
-mkV x = V (MV x)
-mkTyV x = TyV (MV x)
-mkCtxV x = CtxV (MV x)
-
--- instance IsString (Meta String) where fromString = MV
--- instance IsString (Term (Meta String)) where fromString = mkV
--- instance IsString (Type (Meta String)) where fromString = mkTyV
--- instance IsString (Ctx (Meta String)) where fromString = mkCtxV
-
-instance Applicative Meta where
+--
+-- mkV x = V (MV x)
+-- mkTyV x = TyV (MV x)
+-- mkCtxV x = CtxV (MV x)
+--
+-- -- instance IsString (Meta String) where fromString = MV
+-- -- instance IsString (Term (Meta String)) where fromString = mkV
+-- -- instance IsString (Type (Meta String)) where fromString = mkTyV
+-- -- instance IsString (Ctx (Meta String)) where fromString = mkCtxV
+--
+instance Applicative Meta_ where
   pure = MV
   (<*>) = ap
 
-instance Monad Meta where
+instance Monad Meta_ where
   MV x >>= f = f x
-  Lookup ctx x a >>= f = Lookup (fmap (>>= f) ctx) (x >>= f) (fmap (>>= f) a)
-  HasType ctx t a >>= f = HasType (fmap (>>= f) ctx) (fmap (>>= f) t) (fmap (>>= f) a)
+  Lookup ctx x a >>= f = Lookup (ctx >>= f) (x >>= f) (a >>= f)
+  Extend ctx x a >>= f = Extend (ctx >>= f) (x >>= f) (a >>= f)
+  HasType ctx t a >>= f = HasType (ctx >>= f) (t >>= f) (a >>= f)
   Tm x >>= f = Tm $ fmap (>>= f) x
   Tp x >>= f = Tp $ fmap (>>= f) x
-  Ctx x >>= f = Ctx $ fmap (>>= f) x
+  -- Ctx x >>= f = Ctx $ fmap (>>= f) x
 
-instance Ppr a => Ppr (Meta a) where
+instance Ppr a => Ppr (Meta t a) where pprDoc (Meta x) = pprDoc x
+
+instance Ppr a => Ppr [Meta t a] where pprDoc xs = text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
+
+instance Ppr a => Ppr (Meta_ a) where
   pprDoc (MV x) = pprDoc x
   pprDoc (Lookup ctx x a) =
     pprDoc ctx <+> text "|-" <+> pprDoc x <+> text ":" <+> pprDoc a
@@ -139,7 +165,9 @@ instance Ppr a => Ppr (Meta a) where
     pprDoc ctx <+> text "|-" <+> pprDoc t <+> text ":" <+> pprDoc a
   pprDoc (Tm x) = pprDoc x
   pprDoc (Tp x) = pprDoc x
-  pprDoc (Ctx x) = pprDoc x
+  pprDoc Empty = text "Empty"
+  pprDoc (Extend ctx x a) =
+    text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
 
 instance Ppr a => Ppr (Type a) where
   pprDoc (TyV x) = pprDoc x
@@ -147,31 +175,53 @@ instance Ppr a => Ppr (Type a) where
   pprDoc (Arr x y) =
     text "Arr" <.> text "(" <.> pprDoc x <.> text "," <+> pprDoc y <.> text ")"
 
-instance Ppr a => Ppr (Ctx a) where
-  pprDoc (CtxV x) = pprDoc x
-  pprDoc Empty = text "Empty"
-  pprDoc (Extend ctx x a) =
-    text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
+-- instance Ppr a => Ppr (Ctx a) where
+--   pprDoc (CtxV x) = pprDoc x
+--   pprDoc Empty = text "Empty"
+--   pprDoc (Extend ctx x a) =
+--     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
 
 instance Ppr a => Ppr (Term a) where
   pprDoc (V x) = pprDoc x
   pprDoc (App x y) = parens (pprDoc x) <+> pprDoc y
   pprDoc (Lam x body) = text "\\" <.> pprDoc x <.> text "." <+> pprDoc body
   pprDoc MkUnit = text "MkUnit"
+--
+-- instance Ppr a => Ppr [Meta a] where
+--   pprDoc xs =
+--     text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
+--
+instance Substitute Type where
+  applySubst subst = (>>= go)
+    where
+      go x =
+        case substLookup subst x of
+          Just r -> r
+          Nothing -> error $ "Type applySubst: " ++ show x
 
-instance Ppr a => Ppr [Meta a] where
-  pprDoc xs =
-    text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
+instance Substitute Term where
+  applySubst subst = (>>= go)
+    where
+      go x =
+        case substLookup subst x of
+          Just r -> r
+          Nothing -> error $ "Term applySubst: " ++ show x
 
-instance Substitute Meta where
-  applySubst subst = \case
-    MV x -> case substLookup subst x of
-              Just t -> t
-              Nothing -> MV x
-    Lookup ctx x a ->
-      Lookup (fmap (applySubst subst) ctx) (applySubst subst x) (fmap (applySubst subst) a)
-    HasType ctx t a ->
-      HasType (fmap (applySubst subst) ctx) (fmap (applySubst subst) t) (fmap (applySubst subst) a)
+instance Substitute Meta_ where
+  applySubst subst = (>>= go)
+    where
+      go x =
+        case substLookup subst x of
+          Just r -> r
+          Nothing -> error $ "Meta_ applySubst: " ++ show x ++ "\n^--> " ++ show subst
+  -- applySubst subst = \case
+  --   MV x -> case substLookup subst x of
+  --             Just t -> t
+  --             Nothing -> MV x
+  --   Lookup ctx x a ->
+  --     Lookup (fmap (applySubst subst) ctx) (applySubst subst x) (fmap (applySubst subst) a)
+  --   HasType ctx t a ->
+  --     HasType (fmap (applySubst subst) ctx) (fmap (applySubst subst) t) (fmap (applySubst subst) a)
 
 instance Unify Type where
   type UConst Type = Void
@@ -186,160 +236,234 @@ instance Unify Term where
   getVar (V x) = Just x
   getVar _ = Nothing
   getConst _ = Nothing
-
-instance Unify Ctx where
-  type UConst Ctx = Void
-  mkVar = CtxV
-  getVar (CtxV x) = Just x
-  getVar _ = Nothing
-  getConst _ = Nothing
-
-instance Substitute Type
-instance Substitute Term
-instance Substitute Ctx
-
-
--- TODO: Generate these kinds of instances with Generics
-instance Unify Meta where
-  type UConst Meta = String
+--
+-- instance Unify Ctx where
+--   type UConst Ctx = Void
+--   mkVar = CtxV
+--   getVar (CtxV x) = Just x
+--   getVar _ = Nothing
+--   getConst _ = Nothing
+--
+-- instance Substitute Type
+-- instance Substitute Term
+-- instance Substitute Ctx
+--
+--
+-- -- TODO: Generate these kinds of instances with Generics
+instance Unify Meta_ where
+  type UConst Meta_ = String
 
   getVar (MV x) = Just x
   getVar (Tm x) = getVar =<< getVar x
   getVar (Tp x) = getVar =<< getVar x
-  getVar (Ctx x) = getVar =<< getVar x
+  -- getVar (Ctx x) = getVar =<< getVar x
   getVar _ = Nothing
 
   mkVar = MV
   getConst _ = Nothing
 
-  -- matchOne (MV {}) _ = Nothing
-  -- matchOne _ (MV {}) = Nothing
-  -- matchOne (Lookup ctx x a) (Lookup ctx' x' a') =
-  --   Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
-  --
-  -- matchOne (HasType ctx t a) (HasType ctx' t' a') =
-  --   Just [(Ctx ctx, Ctx ctx'), (Tm t, Tm t'), (Tp a, Tp a')]
-  --
-  -- matchOne (Ctx Empty) (Ctx Empty) = Just []
-  -- matchOne (Ctx (Extend ctx x a)) (Ctx (Extend ctx' x' a')) =
-  --   Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
-  -- matchOne (Ctx (CtxV x)) y = matchOne' x y
-  -- matchOne x (Ctx (CtxV y)) = matchOne' x y
-  --
-  -- matchOne (Tp Unit) (Tp Unit) = Just []
-  -- matchOne (Tp (Arr a b)) (Tp (Arr a' b')) =
-  --   Just [(Tp a, Tp a'), (Tp b, Tp b')]
-  -- matchOne (Tp (TyV x)) y = matchOne' x y
-  -- matchOne x (Tp (TyV y)) = matchOne' x y
-  --
-  -- matchOne (Tm (V x)) y = matchOne' x y
-  -- matchOne x (Tm (V y)) = matchOne' x y
-  -- matchOne (Tm (App x y)) (Tm (App x' y')) =
-  --   Just [(Tm x, Tm y), (Tm x', Tm y')]
-  -- matchOne (Tm (Lam x body)) (Tm (Lam x' body')) =
-  --   Just [(x, x'), (Tm body, Tm body')]
-  -- matchOne (Tm MkUnit) (Tm MkUnit) = Just []
-  -- matchOne _ _ = Nothing
-  --
-  -- getChildren (MV {}) = []
-  -- getChildren (Lookup ctx x a) = [Ctx ctx, x, Tp a]
-  --
-  -- getChildren (HasType ctx t a) = [Ctx ctx, Tm t, Tp a]
-  --
-  -- getChildren (Ctx Empty) = []
-  -- getChildren (Ctx (Extend ctx x a)) = [Ctx ctx, x] <> map (Tp . fmap Ctx) (getChildren a)
-  -- getChildren (Ctx (CtxV x)) = [x]
-  --
-  -- getChildren (Tp Unit) = []
-  -- getChildren (Tp (Arr a b)) =
-  --   [Tp a, Tp b]
-  -- getChildren (Tp (TyV x)) = [x]
-  --
-  -- getChildren (Tm (V x)) = [x]
-  -- getChildren (Tm (App x y)) =
-  --   [Tm x, Tm y]
-  -- getChildren (Tm (Lam x body)) =
-  --   [x, Tm body]
-  -- getChildren (Tm MkUnit) = []
+  matchOne (Tm x) (Tm y) = map (bimap Tm Tm) <$> matchOne x y
+  matchOne (Tp x) (Tp y) = map (bimap Tp Tp) <$> matchOne x y
+  matchOne x y =
+    if toConstr x == toConstr y
+    then Just $ zip (children x) (children y)
+    else Nothing
+--
+--   -- matchOne (MV {}) _ = Nothing
+--   -- matchOne _ (MV {}) = Nothing
+--   -- matchOne (Lookup ctx x a) (Lookup ctx' x' a') =
+--   --   Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
+--   --
+--   -- matchOne (HasType ctx t a) (HasType ctx' t' a') =
+--   --   Just [(Ctx ctx, Ctx ctx'), (Tm t, Tm t'), (Tp a, Tp a')]
+--   --
+--   -- matchOne (Ctx Empty) (Ctx Empty) = Just []
+--   -- matchOne (Ctx (Extend ctx x a)) (Ctx (Extend ctx' x' a')) =
+--   --   Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
+--   -- matchOne (Ctx (CtxV x)) y = matchOne' x y
+--   -- matchOne x (Ctx (CtxV y)) = matchOne' x y
+--   --
+--   -- matchOne (Tp Unit) (Tp Unit) = Just []
+--   -- matchOne (Tp (Arr a b)) (Tp (Arr a' b')) =
+--   --   Just [(Tp a, Tp a'), (Tp b, Tp b')]
+--   -- matchOne (Tp (TyV x)) y = matchOne' x y
+--   -- matchOne x (Tp (TyV y)) = matchOne' x y
+--   --
+--   -- matchOne (Tm (V x)) y = matchOne' x y
+--   -- matchOne x (Tm (V y)) = matchOne' x y
+--   -- matchOne (Tm (App x y)) (Tm (App x' y')) =
+--   --   Just [(Tm x, Tm y), (Tm x', Tm y')]
+--   -- matchOne (Tm (Lam x body)) (Tm (Lam x' body')) =
+--   --   Just [(x, x'), (Tm body, Tm body')]
+--   -- matchOne (Tm MkUnit) (Tm MkUnit) = Just []
+--   -- matchOne _ _ = Nothing
+--   --
+--   -- getChildren (MV {}) = []
+--   -- getChildren (Lookup ctx x a) = [Ctx ctx, x, Tp a]
+--   --
+--   -- getChildren (HasType ctx t a) = [Ctx ctx, Tm t, Tp a]
+--   --
+--   -- getChildren (Ctx Empty) = []
+--   -- getChildren (Ctx (Extend ctx x a)) = [Ctx ctx, x] <> map (Tp . fmap Ctx) (getChildren a)
+--   -- getChildren (Ctx (CtxV x)) = [x]
+--   --
+--   -- getChildren (Tp Unit) = []
+--   -- getChildren (Tp (Arr a b)) =
+--   --   [Tp a, Tp b]
+--   -- getChildren (Tp (TyV x)) = [x]
+--   --
+--   -- getChildren (Tm (V x)) = [x]
+--   -- getChildren (Tm (App x y)) =
+--   --   [Tm x, Tm y]
+--   -- getChildren (Tm (Lam x body)) =
+--   --   [x, Tm body]
+--   -- getChildren (Tm MkUnit) = []
+--
+-- -- matchOne' x@(MV {}) y = Just [(x, y)]
+-- -- matchOne' x y@(MV {}) = Just [(x, y)]
+-- -- matchOne' x y = matchOne x y
 
--- matchOne' x@(MV {}) y = Just [(x, y)]
--- matchOne' x y@(MV {}) = Just [(x, y)]
--- matchOne' x y = matchOne x y
+-- class MetaC a where toMeta :: a -> Meta_ String
+-- class TypeC a where toType :: a -> Type (Meta_ String)
+-- class TermC a where toTerm :: a -> Term (Meta_ String)
+-- -- class CtxC a where toCtx :: a -> Ctx (Meta String)
+--
+-- instance MetaC String where toMeta = MV
+-- instance MetaC (Meta_ String) where toMeta = id
+--
+-- instance TypeC String where toType = TyV . MV
+-- instance TypeC (Type (Meta_ String)) where toType = id
+--
+-- instance TermC String where toTerm = V . MV
+-- instance TermC (Term (Meta_ String)) where toTerm = id
 
-class MetaC a where toMeta :: a -> Meta String
-class TypeC a where toType :: a -> Type (Meta String)
-class TermC a where toTerm :: a -> Term (Meta String)
-class CtxC a where toCtx :: a -> Ctx (Meta String)
+--
+-- instance CtxC String where toCtx = CtxV . MV
+-- instance CtxC (Ctx (Meta String)) where toCtx = id
 
-instance MetaC String where toMeta = MV
-instance MetaC (Meta String) where toMeta = id
+class MetaC t b a | a -> b where
+  getMeta :: a -> Meta t b
 
-instance TypeC String where toType = TyV . MV
-instance TypeC (Type (Meta String)) where toType = id
+instance MetaC t b (Meta t b) where getMeta = id
+instance MetaC t String String where getMeta = mv
 
-instance TermC String where toTerm = V . MV
-instance TermC (Term (Meta String)) where toTerm = id
+getMeta' :: forall t b a. MetaC t b a => a -> Meta_ b
+getMeta' = unMeta . getMeta @t
 
-instance CtxC String where toCtx = CtxV . MV
-instance CtxC (Ctx (Meta String)) where toCtx = id
+mv :: forall t a. a -> Meta t a
+mv = coerce (MV :: a -> Meta_ a)
 
-empty :: Ctx (Meta String)
-empty = Empty
+empty :: forall a. Meta MCtx a
+empty = coerce (Empty :: Meta_ a)
 
-extend :: (CtxC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Ctx (Meta String)
-extend ctx x a = Extend (toCtx ctx) (toMeta x) (fmap CtxV (toType a))
+extend :: forall a.
+  Meta MCtx a -> Meta MName a -> Meta MTp a -> Meta MCtx a
+extend (Meta ctx) (Meta x) (Meta a) = Meta $ Extend ctx x a
 
-lookup :: (CtxC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Meta String
-lookup ctx x a = Lookup (toCtx ctx) (toMeta x) (toType a)
+lookup :: forall a.
+  Meta MCtx a -> Meta MName a -> Meta MTp a -> Meta MJudgment a
+lookup (Meta ctx) (Meta x) (Meta a) = Meta $ Lookup ctx x a
 
-hasType :: (CtxC ctx, TermC term, TypeC ty) => ctx -> term -> ty -> Meta String
-hasType ctx x a = HasType (toCtx ctx) (toTerm x) (toType a)
+hasType :: forall a.
+  Meta MCtx a -> Meta MTm a -> Meta MTp a -> Meta MJudgment a
+hasType (Meta ctx) (Meta x) (Meta a) = Meta $ HasType ctx x a
 
-mkUnit :: Term a
-mkUnit = MkUnit
+tm :: forall a. Term a -> Meta MTm a
+tm = coerce . Tm . fmap MV
 
-app :: (TermC term1, TermC term2) => term1 -> term2 -> Term (Meta String)
-app x y = App (toTerm x) (toTerm y)
+tp :: forall a. Type a -> Meta MTp a
+tp = coerce . Tp . fmap MV
 
-lam :: (MetaC meta, TermC term) => meta -> term -> Term (Meta String)
-lam x y = Lam (toMeta x) (toTerm y)
-
-unit :: Type a
-unit = Unit
-
-arr :: (TypeC ty1, TypeC ty2) => ty1 -> ty2 -> Type (Meta String)
-arr x y = Arr (toType x) (toType y)
-
--- class MetaC 
-
-tcRules :: [Rule Meta (Name L.V)]
+tcRules :: [Rule (Meta MJudgment) (Name L.V)]
 tcRules = map (toDebruijnRule . fmap L.V)
-  [fact $ lookup (extend "ctx" "x" "a") "x" "a"
-  ,lookup (extend "ctx" "x" "a") "y" "b"
+  [fact $ lookup (extend (mv "ctx") (mv "x") (mv "a")) (mv "x") (mv "a")
+  ,lookup (extend (mv "ctx") (mv "x") (mv "a")) (mv "y") (mv "b")
     :-
-    [lookup "ctx" "y" "b"]
+    [lookup (mv "ctx") (mv "y") (mv "b")]
 
-  ,fact $ hasType @_ @(Term (Meta String)) @(Type (Meta String))
-            "ctx" mkUnit unit
 
-  ,hasType "ctx" (app "x" "y") "b"
+  ,fact $ hasType
+            (mv "ctx") (tm MkUnit) (tp Unit)
+
+  ,hasType (mv "ctx") (tm (App (V "x") (V "y"))) (mv "b")
     :-
-    [hasType "ctx" "x" (arr "a" "b")
-    ,hasType "ctx" "y" "a"
+    [hasType (mv "ctx") (mv "x") (tp (Arr (TyV "a") (TyV "b")))
+    ,hasType (mv "ctx") (mv "y") (mv "a")
     ]
 
-  ,hasType "ctx" (lam "x" "body") (arr "a" "b")
+  ,hasType (mv "ctx") (tm (Lam "x" (V "body"))) (tp (Arr (TyV "a") (TyV "b")))
     :-
-    [hasType (extend "ctx" "x" "a") "body" "b"
+    [hasType (extend (mv "ctx") (mv "x") (mv "a")) (mv "body") (mv "b")
     ]
   ]
 
 test1 =
   query tcRules
-    $ HasType Empty MkUnit Unit
+    $ hasType empty (tm MkUnit) (tp Unit)
 
 test2 =
   query tcRules
-    $ HasType Empty (Lam (MV (L.V "x")) MkUnit) (TyV (MV (L.V "a")))
+    $ hasType empty (tm (Lam (L.V "x") MkUnit)) (tp (TyV (L.V "a")))
+
+
+
+-- empty :: Meta_ String
+-- empty = Empty
+--
+-- extend :: (MetaC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Meta_ String
+-- extend ctx x a = Extend (toMeta ctx) (toMeta x) (fmap CtxV (toType a))
+--
+-- lookup :: (MetaC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Meta_ String
+-- lookup ctx x a = Lookup (toMeta ctx) (toMeta x) (toType a)
+--
+-- hasType :: (MetaC ctx, TermC term, TypeC ty) => ctx -> term -> ty -> Meta_ String
+-- hasType ctx x a = HasType (toMeta ctx) (toTerm x) (toType a)
+--
+-- mkUnit :: Term a
+-- mkUnit = MkUnit
+--
+-- app :: (TermC term1, TermC term2) => term1 -> term2 -> Term (Meta_ String)
+-- app x y = App (toTerm x) (toTerm y)
+--
+-- lam :: (MetaC meta, TermC term) => meta -> term -> Term (Meta_ String)
+-- lam x y = Lam (toMeta x) (toTerm y)
+--
+-- unit :: Type a
+-- unit = Unit
+--
+-- arr :: (TypeC ty1, TypeC ty2) => ty1 -> ty2 -> Type (Meta_ String)
+-- arr x y = Arr (toType x) (toType y)
+--
+-- -- class MetaC 
+--
+-- tcRules :: [Rule Meta_ (Name L.V)]
+-- tcRules = map (toDebruijnRule . fmap L.V)
+--   [fact $ lookup (extend "ctx" "x" "a") "x" "a"
+--   ,lookup (extend "ctx" "x" "a") "y" "b"
+--     :-
+--     [lookup "ctx" "y" "b"]
+--
+--   ,fact $ hasType @_ @(Term (Meta_ String)) @(Type (Meta_ String))
+--             "ctx" mkUnit unit
+--
+--   ,hasType "ctx" (app "x" "y") "b"
+--     :-
+--     [hasType "ctx" "x" (arr "a" "b")
+--     ,hasType "ctx" "y" "a"
+--     ]
+--
+--   ,hasType "ctx" (lam "x" "body") (arr "a" "b")
+--     :-
+--     [hasType (extend "ctx" "x" "a") "body" "b"
+--     ]
+--   ]
+
+-- test1 =
+--   query tcRules
+--     $ HasType Empty MkUnit Unit
+
+-- test2 =
+--   query tcRules
+--     $ HasType Empty (Lam (MV (L.V "x")) MkUnit) (TyV (MV (L.V "a")))
 
 

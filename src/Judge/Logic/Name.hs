@@ -10,6 +10,8 @@ import Control.Monad.Identity
 
 import Data.Data
 
+import Debug.Trace
+
 -- Names with uniques
 
 data Name a = Name a Int deriving (Show, Eq, Data)
@@ -48,14 +50,16 @@ newtype FreshT m a = FreshT (StateT Int m a)
 type Fresh = FreshT Identity
 
 runFreshT :: Monad m => FreshT m a -> m a
-runFreshT (FreshT m) = evalStateT m 0
+runFreshT (FreshT m) = evalStateT m 1
 
 runFresh :: Fresh a -> a
 runFresh = runIdentity . runFreshT
 
-fresh :: (Monad m, VarC a) => a -> FreshT m a
+fresh :: (Monad m, Show a, VarC a) => a -> FreshT m a
 fresh x = do
   i <- get
   modify succ
-  pure $ updateIx x i
+  let x' = updateIx x i
+  -- () <- traceM $ "updating " ++ show x ++ " to " ++ show x'
+  pure x'
 

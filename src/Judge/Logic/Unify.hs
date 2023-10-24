@@ -22,6 +22,8 @@ import Data.Maybe
 
 import GHC.Generics
 
+import GHC.Stack
+
 import Control.Lens.Plated
 import Control.Lens hiding (getConst)
 
@@ -34,7 +36,7 @@ import Data.Void
 import Debug.Trace
 
 doOccursCheck :: Bool
-doOccursCheck = True
+doOccursCheck = False
 
 data UnifyVar a = UnifyVar (Maybe a) Int
 
@@ -78,51 +80,52 @@ class (Functor f, Substitute f, Eq (UConst f)) => Unify f where
     else Nothing
 
 class Substitute f where
-  applySubst :: Eq a => Subst f a -> f a -> f a
+  applySubst :: (HasCallStack, Show a, Eq a) => Subst f a -> f a -> f a
 
-  default applySubst :: (Eq a, Generic1 f, Substitute (Rep1 f)) => Subst f a -> f a -> f a
-  applySubst subst x = to1 $ applySubst (mapSubstRhs from1 subst) $ from1 x
+  -- default applySubst :: (HasCallStack, Show a, Eq a, Generic1 f, Substitute (Rep1 f)) => Subst f a -> f a -> f a
+  -- applySubst subst x = to1 $ applySubst (mapSubstRhs from1 subst) $ from1 x
 
-instance Substitute f => Substitute (M1 i c f) where
-  applySubst subst (M1 x) = M1 $ applySubst (mapSubstRhs unM1 subst) x
-
-instance Substitute U1 where
-  applySubst _ U1 = U1
-
-instance Substitute (K1 i c) where
-  applySubst _ (K1 a) = K1 a
-
-instance (Substitute f, Substitute g) => Substitute (f :+: g) where
-  applySubst subst (L1 a) = L1 $ applySubst (mapMaybeSubst go subst) a
-    where
-      go x (L1 y) = Just (x, y)
-      go _ _ = Nothing
-  applySubst subst (R1 b) = R1 $ applySubst (mapMaybeSubst go subst) b
-    where
-      go x (R1 y) = Just (x, y)
-      go _ _ = Nothing
-
-instance (Substitute f, Substitute g) => Substitute (f :*: g) where
-  applySubst subst (x :*: y) =
-      applySubst (mapSubstRhs proj1 subst) x :*: applySubst (mapSubstRhs proj2 subst) y
-    where
-      proj1 (x :*: _) = x
-      proj2 (_ :*: y) = y
-
-instance (forall z. Eq z => Eq (g z), Applicative g, Substitute f, Substitute g) => Substitute (f :.: g) where
-  applySubst subst (Comp1 x) = Comp1 $ applySubst (mapMaybeSubst go subst) x
-    where
-      go :: a -> (f :.: g) a -> Maybe (g a, f (g a))
-      go a (Comp1 b) = Just (pure a, b)
-
-instance (Substitute f) => Substitute (Rec1 f) where
-  applySubst subst (Rec1 x) = Rec1 $ applySubst (mapSubstRhs unRec1 subst) x
-
-instance Substitute Par1 where
-  applySubst subst (Par1 x) =
-    case substLookup subst x of
-      Nothing -> error "applySust"
-      Just y -> y
+-- instance Substitute f => Substitute (M1 i c f) where
+--   applySubst subst (M1 x) = M1 $ applySubst (mapSubstRhs unM1 subst) x
+--
+-- instance Substitute U1 where
+--   applySubst _ U1 = U1
+--
+-- instance Substitute (K1 i c) where
+--   applySubst _ (K1 a) = K1 a
+--
+-- instance (Substitute f, Substitute g) => Substitute (f :+: g) where
+--   applySubst subst (L1 a) = L1 $ applySubst (mapMaybeSubst go subst) a
+--     where
+--       go :: a -> (f :+: g) a -> Maybe (a, f a)
+--       go x (L1 y) = Just (x, y)
+--       go x (R1 y) = Just (x, _ y)
+--   applySubst subst (R1 b) = R1 $ applySubst (mapMaybeSubst go subst) b
+--     where
+--       go x (R1 y) = Just (x, y)
+--       go _ _ = Nothing
+--
+-- instance (Substitute f, Substitute g) => Substitute (f :*: g) where
+--   applySubst subst (x :*: y) =
+--       applySubst (mapSubstRhs proj1 subst) x :*: applySubst (mapSubstRhs proj2 subst) y
+--     where
+--       proj1 (x :*: _) = x
+--       proj2 (_ :*: y) = y
+--
+-- instance (forall z. Eq z => Eq (g z), forall z. Show z => Show (g z), Applicative g, Substitute f, Substitute g) => Substitute (f :.: g) where
+--   applySubst subst (Comp1 x) = Comp1 $ applySubst (mapMaybeSubst go subst) x
+--     where
+--       go :: a -> (f :.: g) a -> Maybe (g a, f (g a))
+--       go a (Comp1 b) = Just (pure a, b)
+--
+-- instance (Substitute f) => Substitute (Rec1 f) where
+--   applySubst subst (Rec1 x) = Rec1 $ applySubst (mapSubstRhs unRec1 subst) x
+--
+-- instance Substitute Par1 where
+--   applySubst subst (Par1 x) =
+--     case substLookup subst x of
+--       Nothing -> error $ "applySubst: " ++ show x ++ "\n^--> " ++ show subst
+--       Just y -> y
 
 newtype Subst f a = Subst [(a, f a)]
   deriving (Show, Functor, Foldable, Traversable)
@@ -169,12 +172,12 @@ mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 
 type UnifyC f a = (Ppr a, Eq a, Unify f, Traversable f, Plated (f a), Data a)
 
-applyDisjointSubst_Right :: (Substitute f, Traversable f, Eq b) =>
+applyDisjointSubst_Right :: (Show b, Substitute f, Traversable f, Eq b) =>
   Subst f (Either a b) -> f b -> f b
 applyDisjointSubst_Right subst =
   applySubst (fromDisjointSubst_Right subst)
 
-applyDisjointSubst_Left :: (Substitute f, Traversable f, Eq a) =>
+applyDisjointSubst_Left :: (Show a, Substitute f, Traversable f, Eq a) =>
   Subst f (Either a b) -> f a -> f a
 applyDisjointSubst_Left subst =
   applySubst (fromDisjointSubst_Right (disjointSubstSwap subst))
@@ -182,7 +185,7 @@ applyDisjointSubst_Left subst =
 
 -- TODO: Be careful to not get stuck in a loop when two variables are
 -- "equal" to each other in the substitution?
-applySubstRec :: (Eq a, Unify f) => Subst f a -> f a -> f a
+applySubstRec :: (Show a, Eq a, Unify f) => Subst f a -> f a -> f a
 applySubstRec subst x =
   let y = applySubst subst x
   in
@@ -325,6 +328,6 @@ unifyVar subst xV y
 occursCheck :: (UnifyC f a, Eq a, Plated (f a)) => a -> f a -> Bool
 occursCheck v x
   | not doOccursCheck = False
-  | Just xV <- getVar x = xV == v
+  | Just xV <- getVar x = xV == v -- TODO: Is this right?
   | otherwise = any (occursCheck v) $ children x
 
