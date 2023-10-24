@@ -36,7 +36,7 @@ import Data.Void
 import Debug.Trace
 
 doOccursCheck :: Bool
-doOccursCheck = False
+doOccursCheck = True --False
 
 data UnifyVar a = UnifyVar (Maybe a) Int
 
@@ -170,7 +170,7 @@ mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 --         Just y -> y
 --   | otherwise = 
 
-type UnifyC f a = (Ppr a, Eq a, Unify f, Traversable f, Plated (f a), Data a)
+type UnifyC f a = (Ppr a, Eq a, Unify f, Traversable f, Plated (f a), Data a, Monad f)
 
 applyDisjointSubst_Right :: (Show b, Substitute f, Traversable f, Eq b) =>
   Subst f (Either a b) -> f b -> f b
@@ -251,7 +251,10 @@ toDisjointSubst_Right = mapMaybeSubst toEither
 extendSubst :: (Ppr (f a), UnifyC f a) => Subst f a -> a -> f a -> Maybe (Subst f a)
 extendSubst subst v x =
   case substLookup subst v of
-    Nothing -> singleSubst v x `combineSubst` subst
+    Nothing ->
+      let oneSubst = singleSubst v x
+      in
+      oneSubst `combineSubst` simplifySubst oneSubst subst
     Just y -> unifySubst subst x y
 
 combineSubsts :: forall f a. (Eq a, Unify f) => [Subst f a] -> Maybe (Subst f a)

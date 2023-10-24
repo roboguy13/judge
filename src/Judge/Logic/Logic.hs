@@ -183,7 +183,7 @@ queryDisplaySubsts qr =
 --           go :: a -> (a, f a)
 --           go x = (x, applySubst subst (mkVar x))
 
-type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Applicative f, Plated (f a), Data a, Show a)
+type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Monad f, Plated (f a), Data a, Show a)
 
 mkQueryResult :: Foldable f => (f a -> [Subst f (Either (Name a) a)]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
@@ -219,10 +219,12 @@ queryAll rules =
       runFreshT (querySubstAll emptySubst (map (fmap Left) rules) (map (fmap Right) goal))
 
 querySubst :: (Ppr [f a], QueryC f a, Eq (f a)) => Subst f a -> [Rule f a] -> f a -> FreshT [] (Subst f a)
-querySubst subst rules goal = do
+querySubst subst rules goal0 = do
   rule0 <- lift rules
 
   rule <- freshenRule rule0
+
+  let goal = applySubstRec subst goal0
 
   newSubst <-
     -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
@@ -232,9 +234,9 @@ querySubst subst rules goal = do
 
   case
       -- trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst) $
-      map (applySubst newSubst) (ruleBody rule) of
+      map (applySubstRec newSubst) (ruleBody rule) of
     [] -> pure newSubst
-    newGoals -> querySubstAll newSubst rules newGoals
+    newGoals -> querySubstAll newSubst rules $ map (applySubstRec newSubst) newGoals
 
 querySubstAll :: (Ppr [f a], QueryC f a, Eq (f a)) => Subst f a -> [Rule f a] -> [f a] -> FreshT [] (Subst f a)
 querySubstAll subst rules [] = pure subst
@@ -245,7 +247,7 @@ querySubstAll subst rules (x:xs) = do
 freshenRule :: forall m f a. (Show a, Ppr a, Eq (f a), Ppr (f a), Foldable f, Unify f, Applicative f, Monad m, VarC a, Eq a) => Rule f a -> FreshT m (Rule f a)
 freshenRule (x :- xs) = do
   subst <- freshenSubsts emptySubst (x : xs)
-  pure $ applySubst subst x :- map (applySubst subst) xs
+  pure $ applySubstRec subst x :- map (applySubstRec subst) xs
   -- subst' <- freshenSubst subst xs
 -- -- freshenRule (x :- xs) =
 --   -- liftA2 (:-) (freshen x) (traverse freshen xs)

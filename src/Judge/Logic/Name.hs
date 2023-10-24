@@ -50,7 +50,7 @@ newtype FreshT m a = FreshT (StateT Int m a)
 type Fresh = FreshT Identity
 
 runFreshT :: Monad m => FreshT m a -> m a
-runFreshT (FreshT m) = evalStateT m 1
+runFreshT (FreshT m) = evalStateT m 0
 
 runFresh :: Fresh a -> a
 runFresh = runIdentity . runFreshT
