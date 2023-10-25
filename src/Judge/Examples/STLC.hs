@@ -37,11 +37,13 @@ import Control.Lens.Plated
 
 -- import Unbound.Generics.LocallyNameless
 
+-- (Meta {unMeta = HasType (Extend Empty (Tm (VT (Obj "x"))) (Tp Unit)) (Tm (VT (Obj "x"))) (MV (Left (Name (V "a") 25)))}) [DerivationStep (Meta {unMeta = Lookup (Extend Empty (Tm (VT (Obj "x"))) (Tp Unit)) (Tm (VT (Obj "x"))) (Tp Unit)}) []]]]
+
 data Type a = TyV a | Unit | Arr (Type a) (Type a)
   deriving (Show, Functor, Foldable, Eq, Generic1, Traversable, Data)
 
 data Term a where
-  V :: a -> Term a
+  VT :: a -> Term a
   App :: Term a -> Term a -> Term a
   Lam :: a -> Term a -> Term a
   MkUnit :: Term a
@@ -86,15 +88,29 @@ mkTp (TyV (M x)) = x
 mkTp x = Tp x
 
 mkTm :: Term (Var b (Meta_ b a)) -> Meta_ b a
-mkTm (V (M x)) = x
+mkTm (VT (M x)) = x
 mkTm x = Tm x
 
+normalizeMeta_ :: Meta_ b a -> Meta_ b a
+normalizeMeta_ (Tp x) = mkTp (fmap (fmap normalizeMeta_) x)
+normalizeMeta_ (Tm x) = mkTm (fmap (fmap normalizeMeta_) x)
+normalizeMeta_ (MV x) = MV x
+normalizeMeta_ (Lookup x y z) = Lookup (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
+normalizeMeta_ (HasType x y z) = HasType (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
+normalizeMeta_ (Extend x y z) = Extend (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
+normalizeMeta_ Empty = Empty
+
+normalizeMeta :: Meta t b a -> Meta t b a
+normalizeMeta (Meta x) = Meta $ normalizeMeta_ x
+
+instance Normalize (Meta t b) where normalize = normalizeMeta
+-- (Meta {unMeta = HasType (Extend Empty (Tm (V (Obj "x"))) (Tp Unit)) (Tm (V (Obj "x"))) (MV (Left (Name (V "a") 25)))})
 data MSort = MJudgment | MCtx | MTp | MTm | MName
 
 newtype Meta t b a = Meta { unMeta :: Meta_ b a }
-  deriving (Functor, Applicative, Substitute, Unify, Monad, Foldable, Eq, Traversable)
+  deriving (Functor, Applicative, Substitute, Unify, Monad, Foldable, Eq, Traversable, Show)
 
-instance (Show b, Show a) => Show (Meta t b a) where show (Meta x) = show x
+-- instance (Show b, Show a) => Show (Meta t b a) where show (Meta x) = show x
 
 instance (Data b, Data a) => Plated (Meta t b a) where
   plate :: forall f. Applicative f => (Meta t b a -> f (Meta t b a)) -> Meta t b a -> f (Meta t b a)
@@ -115,12 +131,12 @@ instance Data a => Plated (Term a)
 --   plate f (Tm x) = Tm _
 --
 instance Applicative Term where
-  pure = V
+  pure = VT
   (<*>) = ap
 
 instance Monad Term where
   return = pure
-  V x >>= f = f x
+  VT x >>= f = f x
   App x y >>= f = App (x >>= f) (y >>= f)
   Lam x body >>= f = do
     x' <- f x
@@ -219,7 +235,7 @@ instance Ppr a => Ppr (Type a) where
 --     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
 
 instance Ppr a => Ppr (Term a) where
-  pprDoc (V x) = pprDoc x
+  pprDoc (VT x) = pprDoc x
   pprDoc (App x y) = parens (pprDoc x) <+> pprDoc y
   pprDoc (Lam x body) = text "\\" <.> pprDoc x <.> text "." <+> pprDoc body
   pprDoc MkUnit = text "MkUnit"
@@ -242,7 +258,7 @@ instance Substitute Term where
       go x =
         case substLookup subst x of
           Just r -> r
-          Nothing -> V x --error $ "Term applySubst: " ++ show x
+          Nothing -> VT x --error $ "Term applySubst: " ++ show x
 
 instance Substitute (Meta_ b) where
   applySubst subst = (>>= go)
@@ -270,11 +286,11 @@ instance Unify Type where
 
 instance Unify Term where
   type UConst Term = Void
-  mkVar = V
-  getVar (V x) = Just x
+  mkVar = VT
+  getVar (VT x) = Just x
   getVar _ = Nothing
   getConst _ = Nothing
-  getChildren (Lam x body) = [V x, body]
+  getChildren (Lam x body) = [VT x, body]
   getChildren x = children x
 --
 -- instance Unify Ctx where
@@ -312,7 +328,7 @@ instance (Eq b, Data b) => Unify (Meta_ b) where
   getChildren (Tp x) = mkTp <$> getChildren x
   getChildren x = children x
 
-  getConst (Tm (V (Obj x))) = Just x
+  getConst (Tm (VT (Obj x))) = Just x
   getConst (Tp (TyV (Obj x))) = Just x
   getConst _ = Nothing
 
@@ -440,7 +456,7 @@ tm'' = Meta . mkTm . fmap (M . MV)
 tp'' :: forall b a. Type a -> Meta MTp b a
 tp'' = Meta . mkTp . fmap (M . MV)
 
-instance IsString (Term String) where fromString = V
+instance IsString (Term String) where fromString = VT
 instance IsString (Type String) where fromString = TyV
 instance IsString (Meta t a String) where fromString = mv
 
@@ -454,9 +470,9 @@ tcRules = map (toDebruijnRule . fmap L.V)
     :-
     [lookup "ctx" "y" "b"]
 
-  ,hasType "ctx" (Meta (mkTm (V (Obj "x")))) "a"
+  ,hasType "ctx" (Meta (mkTm (VT (Obj "x")))) "a"
     :-
-    [lookup "ctx" (Meta (mkTm (V (Obj "x")))) "a"]
+    [lookup "ctx" (Meta (mkTm (VT (Obj "x")))) "a"]
 
 
   ,fact $ hasType -- T-Unit

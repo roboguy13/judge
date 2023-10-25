@@ -182,18 +182,22 @@ applyDisjointSubst_Left :: (Show a, Substitute f, Traversable f, Eq a, Show (f a
 applyDisjointSubst_Left subst =
   applySubst (fromDisjointSubst_Right (disjointSubstSwap subst))
 
-
 -- TODO: Be careful to not get stuck in a loop when two variables are
 -- "equal" to each other in the substitution?
-applySubstRec :: (Show a, Eq a, Unify f) => Subst f a -> f a -> f a
+applySubstRec :: (Show a, Foldable f, Eq a, Unify f) => Subst f a -> f a -> f a
 applySubstRec subst x =
   let y = applySubst subst x
+      yVars = toList y
+      notDone = any isJust $ map (substLookup subst) yVars -- NOTE: This could cause an infinite loop if we are not careful
   in
-  case getVar y of
-    Just yV
-      | Just xV <- getVar x, yV == xV -> y
-      | otherwise -> applySubstRec subst y
-    Nothing -> y
+  if notDone
+    then applySubstRec subst y
+    else y
+  -- case getVar y of
+  --   Just yV
+  --     | Just xV <- getVar x, yV == xV -> y
+  --     | otherwise -> applySubstRec subst y
+  --   Nothing -> y
 
 -- Use the variables from the first Subst in the result and
 -- use the second Subst to (recursively) substitute for variables

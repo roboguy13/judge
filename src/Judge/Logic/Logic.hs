@@ -19,6 +19,8 @@ import Data.Foldable
 
 import Data.String
 
+import Data.Bifunctor
+
 import Data.Data
 
 import Control.Monad
@@ -31,6 +33,9 @@ import Control.Monad.State
 import GHC.Generics
 
 import Debug.Trace
+
+class Normalize f where
+  normalize :: f a -> f a
 
 data LTerm a
   = Var a
@@ -155,11 +160,11 @@ data QueryResult f a =
   }
   -- deriving (Show)
 
-substDerivation :: (Show a, Eq a, Substitute f) => Subst f (Either (Name a) a) -> Derivation f (Either (Name a) a) -> Derivation f (Either (Name a) a)
-substDerivation subst deriv = derivationMap1 (applySubst subst) deriv
+substDerivation :: (Show a, Eq a, Substitute f, Unify f, Foldable f) => Subst f (Either (Name a) a) -> Derivation f (Either (Name a) a) -> Derivation f (Either (Name a) a)
+substDerivation subst deriv = derivationMap1 (applySubstRec subst) deriv
 
 -- | Apply the corresponding substitution to each derivation tree
-updateQueryResult :: (Show a, Eq a, Substitute f) => QueryResult f a -> QueryResult f a
+updateQueryResult :: (Show a, Eq a, Substitute f, Unify f, Normalize f, Foldable f) => QueryResult f a -> QueryResult f a
 updateQueryResult qr = qr { queryResultSubsts = map go $ queryResultSubsts qr }
   where
     go (deriv, subst) = (substDerivation subst deriv, subst)
@@ -168,7 +173,7 @@ deriving instance (Show a, Show (f (Either (Name a) a))) => Show (QueryResult f 
 
 -- | Display the resulting `Subst`s in terms of the variables from the
 -- original query:
-queryDisplaySubsts :: forall f a b. (Show a, VarC a, Eq a, Unify f, Monad f) => QueryResult f a -> [Subst f a]
+queryDisplaySubsts :: forall f a b. (Show a, VarC a, Eq a, Unify f, Foldable f, Monad f) => QueryResult f a -> [Subst f a]
 queryDisplaySubsts qr =
     let results = snd <$> queryResultSubsts qr
         initialResultSubst = map mkTheSubst results
@@ -196,12 +201,12 @@ queryDisplaySubsts qr =
 
 type QueryC f a = (Show (f a), Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Monad f, Plated (f a), Data a, Show a)
 
-mkQueryResult :: (Show a, Eq a, Substitute f, Foldable f) => (f a -> [(Derivation f (Either (Name a) a), Subst f (Either (Name a) a))]) -> (f a -> QueryResult f a)
+mkQueryResult :: (Show a, Eq a, Substitute f, Foldable f, Unify f, Normalize f) => (f a -> [(Derivation f (Either (Name a) a), Subst f (Either (Name a) a))]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
   updateQueryResult $
   QueryResult
   { queryOrigVars = toList goal
-  , queryResultSubsts = f goal
+  , queryResultSubsts = map (first (derivationMap1 normalize)) $ f goal
   }
 
 -- mkQueryResultAll :: Foldable f => ([f a] -> [(Derivation f (Either (Name a) a), Subst f (Either (Name a) a))]) -> ([f a] -> QueryResult f a)
@@ -239,7 +244,7 @@ getFirstQueryResultSubst qr =
 --
 --   pure _
 
-query :: (QueryC f a, Show (f (Either (Name a) a)), Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) =>
+query :: (QueryC f a, Show (f (Either (Name a) a)), Normalize f, Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) =>
   [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 query rules =
