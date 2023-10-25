@@ -17,6 +17,9 @@ data Derivation f a =
     [Derivation f a]
   deriving (Functor, Show)
 
+derivationMap1 :: (f a -> g b) -> Derivation f a -> Derivation g b
+derivationMap1 f (DerivationStep hd subtrees) = DerivationStep (f hd) (map (derivationMap1 f) subtrees)
+
 -- | The horizontal width
 --
 -- size (hline n) = n

@@ -155,6 +155,15 @@ data QueryResult f a =
   }
   -- deriving (Show)
 
+substDerivation :: (Show a, Eq a, Substitute f) => Subst f (Either (Name a) a) -> Derivation f (Either (Name a) a) -> Derivation f (Either (Name a) a)
+substDerivation subst deriv = derivationMap1 (applySubst subst) deriv
+
+-- | Apply the corresponding substitution to each derivation tree
+updateQueryResult :: (Show a, Eq a, Substitute f) => QueryResult f a -> QueryResult f a
+updateQueryResult qr = qr { queryResultSubsts = map go $ queryResultSubsts qr }
+  where
+    go (deriv, subst) = (substDerivation subst deriv, subst)
+
 deriving instance (Show a, Show (f (Either (Name a) a))) => Show (QueryResult f a)
 
 -- | Display the resulting `Subst`s in terms of the variables from the
@@ -187,8 +196,9 @@ queryDisplaySubsts qr =
 
 type QueryC f a = (Show (f a), Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Monad f, Plated (f a), Data a, Show a)
 
-mkQueryResult :: Foldable f => (f a -> [(Derivation f (Either (Name a) a), Subst f (Either (Name a) a))]) -> (f a -> QueryResult f a)
+mkQueryResult :: (Show a, Eq a, Substitute f, Foldable f) => (f a -> [(Derivation f (Either (Name a) a), Subst f (Either (Name a) a))]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
+  updateQueryResult $
   QueryResult
   { queryOrigVars = toList goal
   , queryResultSubsts = f goal
