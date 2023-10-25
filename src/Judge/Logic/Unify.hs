@@ -68,15 +68,15 @@ class (Functor f, Substitute f, Eq (UConst f)) => Unify f where
   matchOne :: Data a => f a -> f a -> Maybe [(f a, f a)] -- If the constructors match, give back the children for each
   -- matchOneTree :: f a -> f a -> Maybe (f (a, a))
 
-  -- getChildren :: f a -> [f a] -- TODO: Just use Control.Lens.Plated for this
+  getChildren :: Data a => f a -> [f a]
 
   -- default matchOneTree :: (Generic1 f, GUnify (Rep1 f)) => f a -> f a -> Maybe (f (a, a))
   -- matchOneTree x y = to1 <$> gmatchOne (from1 x) (from1 y)
 
-  default matchOne :: (Data (f a), Plated (f a)) => f a -> f a -> Maybe [(f a, f a)]
+  default matchOne :: (Data a, Data (f a), Plated (f a)) => f a -> f a -> Maybe [(f a, f a)]
   matchOne x y =
     if toConstr x == toConstr y
-    then Just $ zip (children x) (children y)
+    then Just $ zip (getChildren x) (getChildren y)
     else Nothing
 
 class Substitute f where
@@ -170,14 +170,14 @@ mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 --         Just y -> y
 --   | otherwise = 
 
-type UnifyC f a = (Ppr a, Eq a, Unify f, Traversable f, Plated (f a), Data a, Monad f)
+type UnifyC f a = (Ppr a, Eq a, Unify f, Traversable f, Plated (f a), Data a, Monad f, Show a, Show (f a))
 
-applyDisjointSubst_Right :: (Show b, Substitute f, Traversable f, Eq b) =>
+applyDisjointSubst_Right :: (Show b, Substitute f, Traversable f, Eq b, Show (f b)) =>
   Subst f (Either a b) -> f b -> f b
 applyDisjointSubst_Right subst =
   applySubst (fromDisjointSubst_Right subst)
 
-applyDisjointSubst_Left :: (Show a, Substitute f, Traversable f, Eq a) =>
+applyDisjointSubst_Left :: (Show a, Substitute f, Traversable f, Eq a, Show (f a)) =>
   Subst f (Either a b) -> f a -> f a
 applyDisjointSubst_Left subst =
   applySubst (fromDisjointSubst_Right (disjointSubstSwap subst))
@@ -210,7 +210,7 @@ simplifyVar subst v =
       | Just v' <- getVar r -> simplifyVar subst v'
       | otherwise           -> r
 
-simplifyDisjointSubst :: forall f a b. (Unify f, Eq a, Eq b, Monad f, Traversable f) =>
+simplifyDisjointSubst :: forall f a b. (Unify f, Eq a, Eq b, Monad f, Traversable f, Show (f a)) =>
   Subst f a -> Subst f (Either b a) -> Subst f a
 simplifyDisjointSubst subst1 subst2 =
   let subst1' :: Subst f (Either b a)
@@ -220,7 +220,7 @@ simplifyDisjointSubst subst1 subst2 =
   in
   fromDisjointSubst_Right $ simplifySubst subst1' subst2
 
-fromDisjointSubst_Right :: forall f a b. (Substitute f, Traversable f) =>
+fromDisjointSubst_Right :: forall f a b. (Substitute f, Traversable f, Show (f a)) =>
   Subst f (Either b a) -> Subst f a
 fromDisjointSubst_Right = mapMaybeSubst fromEither
   where
@@ -248,13 +248,15 @@ toDisjointSubst_Right = mapMaybeSubst toEither
     toEither :: a -> f a -> Maybe (Either b a, f (Either b a))
     toEither v x = Just (Right v, fmap Right x)
 
-extendSubst :: (Ppr (f a), UnifyC f a) => Subst f a -> a -> f a -> Maybe (Subst f a)
+extendSubst :: (Show a, Ppr a, Ppr (f a), UnifyC f a) => Subst f a -> a -> f a -> Maybe (Subst f a)
 extendSubst subst v x =
   case substLookup subst v of
     Nothing ->
       let oneSubst = singleSubst v x
+          r = oneSubst `combineSubst` subst --simplifySubst oneSubst subst
       in
-      oneSubst `combineSubst` simplifySubst oneSubst subst
+      r
+      -- trace ("extendSubst: " ++ ppr v ++ ", " ++ ppr x ++ " ---> " ++ show r) r
     Just y -> unifySubst subst x y
 
 combineSubsts :: forall f a. (Eq a, Unify f) => [Subst f a] -> Maybe (Subst f a)
@@ -268,13 +270,13 @@ combineSubsts xs = foldr combine (Just emptySubst) xs
 unify :: forall f a. (Ppr (f a), UnifyC f a) => f a -> f a -> Maybe (Subst f a)
 unify = unifySubst emptySubst
 
-unifySubstDisjoint :: forall f a b. (Ppr (f (Either b a)), Plated (f (Either b a)), UnifyC f a, UnifyC f b, Monad f, Traversable f) =>
+unifySubstDisjoint :: forall f a b. (Show (f (Either b a)), Ppr (f (Either b a)), Plated (f (Either b a)), UnifyC f a, UnifyC f b, Monad f, Traversable f) =>
   Subst f a -> f a -> f b -> Maybe (Subst f a)
 unifySubstDisjoint subst x y = do
     subst' <- unifySubstDisjoint' (toDisjointSubst_Right subst) x y
     pure $ simplifyDisjointSubst subst subst'
 
-unifySubstDisjoint' :: forall f a b. (Ppr (f (Either b a)), Plated (f (Either b a)), UnifyC f a, UnifyC f b, Functor f) =>
+unifySubstDisjoint' :: forall f a b. (Show (f (Either b a)), Ppr (f (Either b a)), Plated (f (Either b a)), UnifyC f a, UnifyC f b, Functor f) =>
   Subst f (Either b a) -> f a -> f b -> Maybe (Subst f (Either b a))
 unifySubstDisjoint' subst x y = unifySubst subst (fmap Right x) (fmap Left y)
 
@@ -309,6 +311,7 @@ unifyList :: forall f a. (Ppr (f a), UnifyC f a) => Subst f a -> [(f a, f a)] ->
 unifyList subst [] = Just subst
 unifyList subst ((x, y) : rest) = do
   subst' <- unifySubst subst x y
+  -- () <- traceM $ show subst ++ " ===> " ++ show subst'
   unifyList subst' rest
 
 unifyVar :: forall f (a :: *). (Ppr (f a), UnifyC f a) => Subst f a -> a -> f a -> Maybe (Subst f a)
@@ -332,5 +335,5 @@ occursCheck :: (UnifyC f a, Eq a, Plated (f a)) => a -> f a -> Bool
 occursCheck v x
   | not doOccursCheck = False
   | Just xV <- getVar x = xV == v -- TODO: Is this right?
-  | otherwise = any (occursCheck v) $ children x
+  | otherwise = any (occursCheck v) $ getChildren x
 

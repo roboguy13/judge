@@ -183,7 +183,7 @@ queryDisplaySubsts qr =
 --           go :: a -> (a, f a)
 --           go x = (x, applySubst subst (mkVar x))
 
-type QueryC f a = (Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Monad f, Plated (f a), Data a, Show a)
+type QueryC f a = (Show (f a), Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Monad f, Plated (f a), Data a, Show a)
 
 mkQueryResult :: Foldable f => (f a -> [Subst f (Either (Name a) a)]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
@@ -205,14 +205,14 @@ getFirstQueryResultSubst qr =
     (x:_) -> Just x
     [] -> Nothing
 
-query :: (QueryC f a, Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
+query :: (QueryC f a, Show (f (Either (Name a) a)), Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 query rules =
   mkQueryResult $ \goal ->
       runFreshT (querySubst emptySubst (map (fmap Left) rules) (fmap Right goal))
 
 
-queryAll :: (QueryC f a, Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
+queryAll :: (QueryC f a, Show (f (Either (Name a) a)), Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
 -- queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
 queryAll rules =
   mkQueryResultAll $ \goal ->

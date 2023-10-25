@@ -52,6 +52,10 @@ data Term a where
 data Var b a = Obj b | M a
   deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
 
+instance Bifunctor Var where
+  bimap f _ (Obj x) = Obj (f x)
+  bimap _ g (M x) = M (g x)
+
 instance Applicative (Var b) where
   pure = M
   (<*>) = ap
@@ -252,6 +256,7 @@ instance Unify Type where
   getVar (TyV x) = Just x
   getVar _ = Nothing
   getConst _ = Nothing
+  getChildren = children
 
 instance Unify Term where
   type UConst Term = Void
@@ -259,6 +264,8 @@ instance Unify Term where
   getVar (V x) = Just x
   getVar _ = Nothing
   getConst _ = Nothing
+  getChildren (Lam x body) = [V x, body]
+  getChildren x = children x
 --
 -- instance Unify Ctx where
 --   type UConst Ctx = Void
@@ -272,8 +279,8 @@ instance Unify Term where
 -- instance Substitute Ctx
 --
 --
-instance Data b => Unify (Meta_ b) where
-  type UConst (Meta_ b) = String
+instance (Eq b, Data b) => Unify (Meta_ b) where
+  type UConst (Meta_ b) = b
 
   getVar (MV x) = Just x
   getVar (Tm x) = getVar =<< getM =<< getVar x
@@ -290,6 +297,13 @@ instance Data b => Unify (Meta_ b) where
   getVar _ = Nothing
 
   mkVar = MV
+
+  getChildren (Tm x) = Tm <$> getChildren x
+  getChildren (Tp x) = Tp <$> getChildren x
+  getChildren x = children x
+
+  getConst (Tm (V (Obj x))) = Just x
+  getConst (Tp (TyV (Obj x))) = Just x
   getConst _ = Nothing
 
   matchOne (Tm x) (Tm y) = map (bimap Tm Tm) <$> matchOne x y
@@ -404,6 +418,18 @@ tm = Meta . Tm . fmap Obj --coerce . Tm . fmap MV
 tp :: forall b a. Type b -> Meta MTp b a
 tp = Meta . Tp . fmap Obj --coerce . Tp . fmap MV
 
+tm' :: forall b a. Term (Var b a) -> Meta MTm b a
+tm' = Meta . Tm . fmap (fmap MV)
+
+tp' :: forall b a. Type (Var b a) -> Meta MTp b a
+tp' = Meta . Tp . fmap (fmap MV)
+
+tm'' :: forall b a. Term a -> Meta MTm b a
+tm'' = Meta . Tm . fmap (M . MV)
+
+tp'' :: forall b a. Type a -> Meta MTp b a
+tp'' = Meta . Tp . fmap (M . MV)
+
 tcRules :: [Rule (Meta MJudgment String) (Name L.V)]
 tcRules = map (toDebruijnRule . fmap L.V)
   [fact $ lookup (extend (mv "ctx") (mv "x") (mv "a")) (mv "x") (mv "a")
@@ -413,15 +439,15 @@ tcRules = map (toDebruijnRule . fmap L.V)
 
 
   ,fact $ hasType
-            (mv "ctx") (tm MkUnit) (tp Unit)
+            (mv "ctx") (tm'' MkUnit) (tp'' Unit)
 
-  ,hasType (mv "ctx") (tm (App (V "x") (V "y"))) (mv "b")
+  ,hasType (mv "ctx") (tm'' (App (V "x") (V "y"))) (mv "b")
     :-
     [hasType (mv "ctx") (mv "y") (mv "a")
-    ,hasType (mv "ctx") (mv "x") (tp (Arr (TyV "a") (TyV "b")))
+    ,hasType (mv "ctx") (mv "x") (tp'' (Arr (TyV "a") (TyV "b")))
     ]
 
-  ,hasType (mv "ctx") (tm (Lam "x" (V "body"))) (tp (Arr (TyV "a") (TyV "b")))
+  ,hasType (mv "ctx") (tm'' (Lam "x" (V "body"))) (tp'' (Arr (TyV "a") (TyV "b")))
     :-
     [hasType
       (extend (mv "ctx") (mv "x") (mv "a"))
@@ -434,16 +460,18 @@ tcRules = map (toDebruijnRule . fmap L.V)
 -- The example this is from should not have an App there, I think.
 --    *** unified Extend(Empty, ??x!18, Unit) |- ??body!20 : ??b!21 and ??ctx!29 |- (??x!30) ??y!27 : ??b!32 to get [...]
 
--- inferType :: Term L.V -> Maybe (Type L.V)
--- inferType t = do
---   subst <- getFirstQueryResultSubst $ query tcRules $ hasType empty (tm t) (mv (L.V "a"))
---   case applySubst subst $ mv (Right (L.V "a")) of
---     Meta (Tp a) -> traverse go a
---     Meta (MV _) -> Nothing
---     x -> error $ "inferType: " ++ show x
---   where
---     go (MV (Right x)) = Just x
---     go _ = Nothing
+inferType :: Term String -> Maybe (Type L.V)
+inferType t = do
+  subst <- getFirstQueryResultSubst $ query tcRules $ hasType empty (tm t) (mv (L.V "a"))
+  case applySubst subst $ mv (Right (L.V "a")) of
+    Meta (Tp a) -> traverse (go . first L.V) a
+    Meta (MV _) -> Nothing
+    x -> error $ "inferType: " ++ show x
+  where
+    go (Obj x) = Just x
+    go (M _) = Nothing
+    -- go (MV (Right x)) = Just x
+    -- go _ = Nothing
 
 test1 =
   query tcRules
