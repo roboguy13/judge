@@ -150,8 +150,8 @@ instance Substitute LTerm where
 data QueryResult f a =
   QueryResult
   { queryOrigVars :: [a]
-  , queryResultSubsts :: [Subst f (Either (Name a) a)]
-  -- , queryResultSubsts :: [(Derivation f a, Subst f (Either (Name a) a))]
+  -- , queryResultSubsts :: [Subst f (Either (Name a) a)]
+  , queryResultSubsts :: [(Derivation f (Either (Name a) a), Subst f (Either (Name a) a))]
   }
   -- deriving (Show)
 
@@ -161,7 +161,7 @@ deriving instance (Show a, Show (f (Either (Name a) a))) => Show (QueryResult f 
 -- original query:
 queryDisplaySubsts :: forall f a b. (Show a, VarC a, Eq a, Unify f, Monad f) => QueryResult f a -> [Subst f a]
 queryDisplaySubsts qr =
-    let results = queryResultSubsts qr
+    let results = snd <$> queryResultSubsts qr
         initialResultSubst = map mkTheSubst results
     in
     map (fmap fromDisjointName) $ zipWith simplifySubst initialResultSubst results
@@ -187,24 +187,24 @@ queryDisplaySubsts qr =
 
 type QueryC f a = (Show (f a), Ppr a, Eq a, VarC a, Unify f, Ppr (f a), Foldable f, Traversable f, Monad f, Plated (f a), Data a, Show a)
 
-mkQueryResult :: Foldable f => (f a -> [Subst f (Either (Name a) a)]) -> (f a -> QueryResult f a)
+mkQueryResult :: Foldable f => (f a -> [(Derivation f (Either (Name a) a), Subst f (Either (Name a) a))]) -> (f a -> QueryResult f a)
 mkQueryResult f goal =
   QueryResult
   { queryOrigVars = toList goal
   , queryResultSubsts = f goal
   }
 
-mkQueryResultAll :: Foldable f => ([f a] -> [Subst f (Either (Name a) a)]) -> ([f a] -> QueryResult f a)
-mkQueryResultAll f goal =
-  QueryResult
-  { queryOrigVars = concatMap toList goal
-  , queryResultSubsts = f goal
-  }
+-- mkQueryResultAll :: Foldable f => ([f a] -> [(Derivation f (Either (Name a) a), Subst f (Either (Name a) a))]) -> ([f a] -> QueryResult f a)
+-- mkQueryResultAll f goal =
+--   QueryResult
+--   { queryOrigVars = concatMap toList goal
+--   , queryResultSubsts = f goal
+--   }
 
 getFirstQueryResultSubst :: QueryResult f a -> Maybe (Subst f (Either (Name a) a))
 getFirstQueryResultSubst qr =
   case queryResultSubsts qr of
-    (x:_) -> Just x
+    ((_, x):_) -> Just x
     [] -> Nothing
 
 -- extendDerivation :: Derivation f a -> [Derivation f a] -> Derivation f a
@@ -229,20 +229,23 @@ getFirstQueryResultSubst qr =
 --
 --   pure _
 
-query :: (QueryC f a, Show (f (Either (Name a) a)), Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
+query :: (QueryC f a, Show (f (Either (Name a) a)), Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) =>
+  [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
 query rules =
   mkQueryResult $ \goal ->
       runFreshT (querySubst emptySubst (map (fmap Left) rules) (fmap Right goal))
 
 
-queryAll :: (QueryC f a, Show (f (Either (Name a) a)), Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> [f a] -> QueryResult f a
--- queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
-queryAll rules =
-  mkQueryResultAll $ \goal ->
-      runFreshT (querySubstAll emptySubst (map (fmap Left) rules) (map (fmap Right) goal))
+-- queryAll :: (QueryC f a, Show (f (Either (Name a) a)), Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) =>
+--   [Rule f (Name a)] -> [f a] -> QueryResult f a
+-- -- queryAll rules = mkQueryResultAll (map fromDisjointSubst_Right . querySubstAll emptySubst rules)
+-- queryAll rules =
+--   mkQueryResultAll $ \goal ->
+--       runFreshT (querySubstAll emptySubst (map (fmap Left) rules) (map (fmap Right) goal))
 
-querySubst :: (Ppr [f a], QueryC f a, Eq (f a)) => Subst f a -> [Rule f a] -> f a -> FreshT [] (Subst f a)
+querySubst :: (Ppr [f a], QueryC f a, Eq (f a)) =>
+  Subst f a -> [Rule f a] -> f a -> FreshT [] (Derivation f a, Subst f a)
 querySubst subst rules goal0 = do
   rule0 <- lift rules
 
@@ -259,14 +262,20 @@ querySubst subst rules goal0 = do
   case
       -- trace ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst) $
       map (applySubstRec newSubst) (ruleBody rule) of
-    [] -> pure newSubst
-    newGoals -> querySubstAll newSubst rules $ map (applySubstRec newSubst) newGoals
 
-querySubstAll :: (Ppr [f a], QueryC f a, Eq (f a)) => Subst f a -> [Rule f a] -> [f a] -> FreshT [] (Subst f a)
-querySubstAll subst rules [] = pure subst
+    [] -> pure (DerivationStep goal [], newSubst)
+
+    newGoals -> do
+      (derivs, newSubst') <- querySubstAll newSubst rules $ map (applySubstRec newSubst) newGoals
+      pure (DerivationStep goal derivs, newSubst')
+
+querySubstAll :: (Ppr [f a], QueryC f a, Eq (f a)) =>
+  Subst f a -> [Rule f a] -> [f a] -> FreshT [] ([Derivation f a], Subst f a)
+querySubstAll subst rules [] = pure ([], subst)
 querySubstAll subst rules (x:xs) = do
-  newSubst <- querySubst subst rules x
-  querySubstAll newSubst rules xs
+  (deriv, newSubst) <- querySubst subst rules x
+  (derivs, newSubst') <- querySubstAll newSubst rules xs
+  pure (deriv : derivs, newSubst')
 
 freshenRule :: forall m f a. (Show a, Ppr a, Eq (f a), Ppr (f a), Foldable f, Unify f, Applicative f, Monad m, VarC a, Eq a) => Rule f a -> FreshT m (Rule f a)
 freshenRule (x :- xs) = do

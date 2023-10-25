@@ -196,7 +196,8 @@ instance (Ppr b, Ppr a) => Ppr [Meta t b a] where pprDoc xs = text "[" <.> foldr
 instance (Ppr b, Ppr a) => Ppr (Meta_ b a) where
   pprDoc (MV x) = pprDoc x
   pprDoc (Lookup ctx x a) =
-    pprDoc ctx <+> text "|-" <+> pprDoc x <+> text ":" <+> pprDoc a
+    parens (pprDoc x <+> text ":" <+> pprDoc a) <+> "∈" <+> pprDoc ctx
+    -- pprDoc ctx <+> text "\\in" <+> pprDoc x <+> text ":" <+> pprDoc a
   pprDoc (HasType ctx t a) =
     pprDoc ctx <+> text "|-" <+> pprDoc t <+> text ":" <+> pprDoc a
   pprDoc (Tm x) = pprDoc x
@@ -513,6 +514,8 @@ test2 =
 
 test3 = inferType (App (Lam "x" "x") MkUnit)
 test4 = inferType (App (Lam "x" MkUnit) MkUnit)
+
+test5 = query tcRules $ hasType empty (tm (App (Lam "x" "x") MkUnit)) (mv (L.V "a"))
 
 data PprShow a = PprShow a
 

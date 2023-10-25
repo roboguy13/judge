@@ -119,4 +119,5 @@ test-suite judgment-test
         judgment,
         tasty,
         tasty-hunit,
+        nat,
 
