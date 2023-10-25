@@ -5,6 +5,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Judge.Examples.STLC
   where
@@ -438,33 +439,37 @@ tm'' = Meta . mkTm . fmap (M . MV)
 tp'' :: forall b a. Type a -> Meta MTp b a
 tp'' = Meta . mkTp . fmap (M . MV)
 
+instance IsString (Term String) where fromString = V
+instance IsString (Type String) where fromString = TyV
+instance IsString (Meta t a String) where fromString = mv
+
 tcRules :: [Rule (Meta MJudgment String) (Name L.V)]
 tcRules = map (toDebruijnRule . fmap L.V)
-  [fact $ lookup (extend (mv "ctx") (mv "x") (mv "a")) (mv "x") (mv "a")
-  ,lookup (extend (mv "ctx") (mv "x") (mv "a")) (mv "y") (mv "b")
+  [fact $ lookup (extend "ctx" "x" "a") "x" "a"
+  ,lookup (extend "ctx" "x" "a") "y" "b"
     :-
-    [lookup (mv "ctx") (mv "y") (mv "b")]
+    [lookup "ctx" "y" "b"]
 
-  ,hasType (mv "ctx") (Meta (mkTm (V (Obj "x")))) (mv "a")
+  ,hasType "ctx" (Meta (mkTm (V (Obj "x")))) "a"
     :-
-    [lookup (mv "ctx") (Meta (mkTm (V (Obj "x")))) (mv "a")]
+    [lookup "ctx" (Meta (mkTm (V (Obj "x")))) "a"]
 
 
   ,fact $ hasType -- T-Unit
-            (mv "ctx") (tm'' MkUnit) (tp'' Unit)
+            "ctx" (tm'' MkUnit) (tp'' Unit)
 
-  ,hasType (mv "ctx") (tm'' (App (V "x") (V "y"))) (mv "b") -- T-App
+  ,hasType "ctx" (tm'' (App "x" "y")) "b" -- T-App
     :-
-    [hasType (mv "ctx") (mv "y") (mv "a")
-    ,hasType (mv "ctx") (mv "x") (tp'' (Arr (TyV "a") (TyV "b")))
+    [hasType "ctx" "y" "a"
+    ,hasType "ctx" "x" (tp'' (Arr "a" "b"))
     ]
 
-  ,hasType (mv "ctx") (tm'' (Lam "x" (V "body"))) (tp'' (Arr (TyV "a") (TyV "b"))) -- T-Lam
+  ,hasType "ctx" (tm'' (Lam "x" "body")) (tp'' (Arr "a" "b")) -- T-Lam
     :-
     [hasType
-      (extend (mv "ctx") (mv "x") (mv "a"))
-      (mv "body")
-      (mv "b")
+      (extend "ctx" "x" "a")
+      "body"
+      "b"
     ]
   ]
 
@@ -502,6 +507,9 @@ test1 =
 test2 =
   query tcRules
     $ hasType empty (tm (Lam "x" MkUnit)) (mv (L.V "a"))
+
+test3 = inferType (App (Lam "x" "x") MkUnit)
+test4 = inferType (App (Lam "x" MkUnit) MkUnit)
 
 
 
