@@ -443,6 +443,9 @@ instance IsString (Term String) where fromString = V
 instance IsString (Type String) where fromString = TyV
 instance IsString (Meta t a String) where fromString = mv
 
+retagSubst :: Subst (Meta t a) b -> Subst (Meta t' a) b
+retagSubst = coerce
+
 tcRules :: [Rule (Meta MJudgment String) (Name L.V)]
 tcRules = map (toDebruijnRule . fmap L.V)
   [fact $ lookup (extend "ctx" "x" "a") "x" "a"
@@ -510,6 +513,11 @@ test2 =
 
 test3 = inferType (App (Lam "x" "x") MkUnit)
 test4 = inferType (App (Lam "x" MkUnit) MkUnit)
+
+data PprShow a = PprShow a
+
+instance Ppr a => Ppr (PprShow a) where pprDoc (PprShow x) = pprDoc x
+instance Ppr a => Show (PprShow a) where show = ppr
 
 
 
