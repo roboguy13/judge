@@ -88,7 +88,6 @@ mkTm :: Term (Var b (Meta_ b a)) -> Meta_ b a
 mkTm (V (M x)) = x
 mkTm x = Tm x
 
-
 data MSort = MJudgment | MCtx | MTp | MTm | MName
 
 newtype Meta t b a = Meta { unMeta :: Meta_ b a }
@@ -502,7 +501,7 @@ test1 =
 
 test2 =
   query tcRules
-    $ hasType empty (tm (Lam "x" MkUnit)) (tp (TyV "a"))
+    $ hasType empty (tm (Lam "x" MkUnit)) (mv (L.V "a"))
 
 
 
