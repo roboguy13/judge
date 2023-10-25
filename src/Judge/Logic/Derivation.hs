@@ -80,6 +80,20 @@ x <++> y = x <.> text (replicate hypothesisSpacing ' ') <.> y
 clamp :: Int -> Int -> Int
 clamp x y = if y < x then x else y
 
+centerBelow :: Doc -> Doc -> Doc
+centerBelow a b =
+  let aStr = render a
+      bStr = render b
+      lenA = length aStr
+      lenB = length bStr
+      diff = lenA - lenB
+  in if diff > 0 then
+       let padding = diff `div` 2
+           paddedB = text $ replicate padding ' ' ++ bStr
+       in a $$ paddedB
+     else
+       a $$ b
+
 instance (Ppr (f a)) => Ppr (Derivation f a) where
   pprDoc (DerivationStep goal subtrees) =
     let goalDoc = pprDoc goal
@@ -90,8 +104,7 @@ instance (Ppr (f a)) => Ppr (Derivation f a) where
         width = max (size goalDoc) (sum (map size subtreeDocs) + spacing)
     in
     foldr juxtapose mempty subtreeDocs
-    $+$ hline width
-    $+$ goalDoc
+    $+$ centerBelow (hline width) goalDoc
     -- let len = length $ ppr goal
     -- in
     -- $$ text (replicate len '-')
