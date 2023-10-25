@@ -1,3 +1,4 @@
+{-# LANGUAGE UndecidableInstances #-}
 module Judge.Logic.Name
   where
 
@@ -45,7 +46,11 @@ instance (VarC a, VarC b) => VarC (Either a b) where
   fromDisjointName = error "fromDisjointName Either" --bimap fromDisjointName fromDisjointName
 
 newtype FreshT m a = FreshT (StateT Int m a)
-  deriving (Functor, Applicative, Monad, MonadState Int, MonadTrans)
+  deriving (Functor, Applicative, Monad, MonadTrans)
+
+instance MonadState s m => MonadState s (FreshT m) where
+  get = lift get
+  put = lift . put
 
 type Fresh = FreshT Identity
 
@@ -57,8 +62,8 @@ runFresh = runIdentity . runFreshT
 
 fresh :: (Monad m, Show a, VarC a) => a -> FreshT m a
 fresh x = do
-  i <- get
-  modify succ
+  i <- FreshT get
+  FreshT $ modify succ
   let x' = updateIx x i
   -- () <- traceM $ "updating " ++ show x ++ " to " ++ show x'
   pure x'

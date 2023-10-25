@@ -9,6 +9,7 @@ module Judge.Logic.Logic
 
 import Judge.Logic.Unify
 import Judge.Logic.Name
+import Judge.Logic.Derivation
 import Judge.Ppr
 
 import Data.Maybe
@@ -25,7 +26,7 @@ import Control.Applicative hiding (Const)
 
 import Control.Lens.Plated
 
-import Control.Monad.Morph
+import Control.Monad.State
 
 import GHC.Generics
 
@@ -81,7 +82,7 @@ fact x = x :- []
 getVars :: LTerm a -> [a]
 getVars = toList
 
-type Query a = [LTerm a]
+-- type Query a = [LTerm a]
 
 fromApp :: (LTerm a, LTerm a) -> (LTerm a, [LTerm a])
 fromApp ((App x y), z) =
@@ -150,6 +151,7 @@ data QueryResult f a =
   QueryResult
   { queryOrigVars :: [a]
   , queryResultSubsts :: [Subst f (Either (Name a) a)]
+  -- , queryResultSubsts :: [(Derivation f a, Subst f (Either (Name a) a))]
   }
   -- deriving (Show)
 
@@ -204,6 +206,28 @@ getFirstQueryResultSubst qr =
   case queryResultSubsts qr of
     (x:_) -> Just x
     [] -> Nothing
+
+-- extendDerivation :: Derivation f a -> [Derivation f a] -> Derivation f a
+-- extendDerivation (DerivationStep hd []) ys = DerivationStep hd ys
+-- extendDerivation (DerivationStep hd xs) ys =
+--   DerivationStep
+
+-- isolatedQuery :: Derivation f a -> Query f a b -> Query f a (Derivation f a, b)
+-- isolatedQuery deriv q = do
+--   original <- get -- Save state
+--   put deriv
+--   r <- q
+--   newDeriv <- get
+--   put original    -- Reset state
+--   pure (newDeriv, r)
+--
+-- isolatedQueries :: f a -> [Query f a b] -> Query f a [b]
+-- isolatedQueries ruleHead qs = do
+--   let deriv = DerivationStep ruleHead []
+--
+--   (derivs, rs) <- unzip <$> traverse (isolatedQuery deriv) qs
+--
+--   pure _
 
 query :: (QueryC f a, Show (f (Either (Name a) a)), Eq (f (Either (Name a) a)), Plated (f (Either (Name a) a)), Ppr [f (Either (Name a) a)], Ppr (f (Either (Name a) a))) => [Rule f (Name a)] -> f a -> QueryResult f a
 -- query rules = mkQueryResult (map fromDisjointSubst_Right . querySubst emptySubst rules)
