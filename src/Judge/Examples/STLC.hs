@@ -80,6 +80,15 @@ data Meta_ b a where
   Tm :: Term (Var b (Meta_ b a)) -> Meta_ b a
   deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
 
+mkTp :: Type (Var b (Meta_ b a)) -> Meta_ b a
+mkTp (TyV (M x)) = x
+mkTp x = Tp x
+
+mkTm :: Term (Var b (Meta_ b a)) -> Meta_ b a
+mkTm (V (M x)) = x
+mkTm x = Tm x
+
+
 data MSort = MJudgment | MCtx | MTp | MTm | MName
 
 newtype Meta t b a = Meta { unMeta :: Meta_ b a }
@@ -168,12 +177,12 @@ instance Monad (Meta_ b) where
   Extend ctx x a >>= f = Extend (ctx >>= f) (x >>= f) (a >>= f)
   HasType ctx t a >>= f = HasType (ctx >>= f) (t >>= f) (a >>= f)
 
-  Tm x >>= f = Tm $ fmap go x
+  Tm x >>= f = mkTm $ fmap go x
     where
       go (Obj x) = Obj x
       go (M x) = M $ x >>= f
 
-  Tp x >>= f = Tp $ fmap go x
+  Tp x >>= f = mkTp $ fmap go x
     where
       go (Obj x) = Obj x
       go (M x) = M $ x >>= f
@@ -298,16 +307,16 @@ instance (Eq b, Data b) => Unify (Meta_ b) where
 
   mkVar = MV
 
-  getChildren (Tm x) = Tm <$> getChildren x
-  getChildren (Tp x) = Tp <$> getChildren x
+  getChildren (Tm x) = mkTm <$> getChildren x
+  getChildren (Tp x) = mkTp <$> getChildren x
   getChildren x = children x
 
   getConst (Tm (V (Obj x))) = Just x
   getConst (Tp (TyV (Obj x))) = Just x
   getConst _ = Nothing
 
-  matchOne (Tm x) (Tm y) = map (bimap Tm Tm) <$> matchOne x y
-  matchOne (Tp x) (Tp y) = map (bimap Tp Tp) <$> matchOne x y
+  matchOne (Tm x) (Tm y) = map (bimap mkTm mkTm) <$> matchOne x y
+  matchOne (Tp x) (Tp y) = map (bimap mkTp mkTp) <$> matchOne x y
   matchOne x y =
     if toConstr x == toConstr y
     then Just $ zip (children x) (children y)
@@ -413,22 +422,22 @@ hasType :: forall b a.
 hasType (Meta ctx) (Meta x) (Meta a) = Meta $ HasType ctx x a
 
 tm :: forall b a. Term b -> Meta MTm b a
-tm = Meta . Tm . fmap Obj --coerce . Tm . fmap MV
+tm = Meta . mkTm . fmap Obj --coerce . Tm . fmap MV
 
 tp :: forall b a. Type b -> Meta MTp b a
-tp = Meta . Tp . fmap Obj --coerce . Tp . fmap MV
+tp = Meta . mkTp . fmap Obj --coerce . Tp . fmap MV
 
 tm' :: forall b a. Term (Var b a) -> Meta MTm b a
-tm' = Meta . Tm . fmap (fmap MV)
+tm' = Meta . mkTm . fmap (fmap MV)
 
 tp' :: forall b a. Type (Var b a) -> Meta MTp b a
-tp' = Meta . Tp . fmap (fmap MV)
+tp' = Meta . mkTp . fmap (fmap MV)
 
 tm'' :: forall b a. Term a -> Meta MTm b a
-tm'' = Meta . Tm . fmap (M . MV)
+tm'' = Meta . mkTm . fmap (M . MV)
 
 tp'' :: forall b a. Type a -> Meta MTp b a
-tp'' = Meta . Tp . fmap (M . MV)
+tp'' = Meta . mkTp . fmap (M . MV)
 
 tcRules :: [Rule (Meta MJudgment String) (Name L.V)]
 tcRules = map (toDebruijnRule . fmap L.V)
@@ -437,9 +446,9 @@ tcRules = map (toDebruijnRule . fmap L.V)
     :-
     [lookup (mv "ctx") (mv "y") (mv "b")]
 
-  ,hasType (mv "ctx") (Meta (Tm (V (Obj "x")))) (mv "a")
+  ,hasType (mv "ctx") (Meta (mkTm (V (Obj "x")))) (mv "a")
     :-
-    [lookup (mv "ctx") (Meta (Tm (V (Obj "x")))) (mv "a")]
+    [lookup (mv "ctx") (Meta (mkTm (V (Obj "x")))) (mv "a")]
 
 
   ,fact $ hasType -- T-Unit
@@ -464,16 +473,26 @@ tcRules = map (toDebruijnRule . fmap L.V)
 -- The example this is from should not have an App there, I think.
 --    *** unified Extend(Empty, ??x!18, Unit) |- ??body!20 : ??b!21 and ??ctx!29 |- (??x!30) ??y!27 : ??b!32 to get [...]
 
-inferType :: Term String -> Maybe (Type L.V)
+inferType :: Term String -> Maybe (Type String)
 inferType t = do
-  subst <- getFirstQueryResultSubst $ query tcRules $ hasType empty (tm t) (mv (L.V "a"))
-  case applySubst subst $ mv (Right (L.V "a")) of
-    Meta (Tp a) -> traverse (go . first L.V) a
-    Meta (MV _) -> Nothing
-    x -> error $ "inferType: " ++ show x
+  let qr = query tcRules $ hasType empty (tm t) (mv (L.V "__a"))
+
+  case queryDisplaySubsts qr of
+    [] -> Nothing
+    (subst:_) ->
+      case applySubst subst $ mv (L.V "__a") of
+        Meta (Tp a) -> join <$> trav ((>>= traverse go') . go) a
+        Meta (MV _) -> Nothing
+        x -> error $ "inferType: " ++ show x
   where
-    go (Obj x) = Just x
+    go (Obj x) = Just undefined -- $ TyV undefined --(Obj x)
+    go (M (Tp x)) = Just x
     go (M _) = Nothing
+
+    go' (Obj x) = Just x
+    go' _ = Nothing
+
+    trav f r = sequenceA <$> traverse f r
     -- go (MV (Right x)) = Just x
     -- go _ = Nothing
 
