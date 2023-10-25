@@ -437,17 +437,21 @@ tcRules = map (toDebruijnRule . fmap L.V)
     :-
     [lookup (mv "ctx") (mv "y") (mv "b")]
 
+  ,hasType (mv "ctx") (Meta (Tm (V (Obj "x")))) (mv "a")
+    :-
+    [lookup (mv "ctx") (Meta (Tm (V (Obj "x")))) (mv "a")]
 
-  ,fact $ hasType
+
+  ,fact $ hasType -- T-Unit
             (mv "ctx") (tm'' MkUnit) (tp'' Unit)
 
-  ,hasType (mv "ctx") (tm'' (App (V "x") (V "y"))) (mv "b")
+  ,hasType (mv "ctx") (tm'' (App (V "x") (V "y"))) (mv "b") -- T-App
     :-
     [hasType (mv "ctx") (mv "y") (mv "a")
     ,hasType (mv "ctx") (mv "x") (tp'' (Arr (TyV "a") (TyV "b")))
     ]
 
-  ,hasType (mv "ctx") (tm'' (Lam "x" (V "body"))) (tp'' (Arr (TyV "a") (TyV "b")))
+  ,hasType (mv "ctx") (tm'' (Lam "x" (V "body"))) (tp'' (Arr (TyV "a") (TyV "b"))) -- T-Lam
     :-
     [hasType
       (extend (mv "ctx") (mv "x") (mv "a"))
