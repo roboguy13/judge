@@ -45,7 +45,7 @@ juxtapose a b =
       aPaddedRight = map (\x -> padRight x maxALineLength) aPadded
       bPadded = padLinesTop bLines maxLength
       bPaddedRight = map (\x -> padRight x maxALineLength) bPadded
-   in vcat $ map stripEndingSpacesDoc $ zipWith (<+>) (map text aPaddedRight) (map text bPaddedRight)
+   in vcat $ map stripEndingSpacesDoc $ zipWith (<++>) (map text aPaddedRight) (map text bPaddedRight)
 
 stripEndingSpacesDoc :: Doc -> Doc
 stripEndingSpacesDoc = text . stripEndingSpaces . render
@@ -56,90 +56,38 @@ stripEndingSpaces xs
 stripEndingSpaces (x:xs) = x : stripEndingSpaces xs
 stripEndingSpaces "" = ""
 
--- juxtapose :: Doc -> Doc -> Doc
--- juxtapose a b = 
---   let aLines = lines $ render a
---       bLines = lines $ render b
---       maxLength = max (length aLines) (length bLines)
---       padLines ls n = replicate (n - length ls) "" ++ ls
---       aPadded = padLines aLines maxLength
---       bPadded = padLines bLines maxLength
---    in vcat $ zipWith (\a b -> text a <+> text b) aPadded bPadded
+hypothesisSpacing :: Int
+hypothesisSpacing = 4
 
--- juxtapose :: Doc -> Doc -> Doc
--- juxtapose a b = 
---   let aLines = lines $ render a
---       bLines = lines $ render b
---       maxLength = max (length aLines) (length bLines)
---       padLines ls n = replicate (n - length ls) "" ++ ls
---       aPadded = padLines aLines maxLength
---       bPadded = padLines bLines maxLength
---    in vcat $ zipWith (<+>) (map text aPadded) (map text bPadded)
+(<++>) :: Doc -> Doc -> Doc
+x <++> y = x <.> text (replicate hypothesisSpacing ' ') <.> y
 
--- juxtapose :: Doc -> Doc -> Doc
--- juxtapose a b = 
---   let aLines = lines $ render a
---       bLines = lines $ render b
---       maxLength = max (length aLines) (length bLines)
---       maxALineLength = maximum $ map length aLines
---       padLines ls n = ls ++ replicate (n - length ls) ""
---       padLeft str len = replicate (len - length str) ' ' ++ str
---       aPadded = padLines aLines maxLength
---       bPadded = padLines bLines maxLength
---       bPaddedLeft = map (\x -> padLeft x maxALineLength) bPadded
---    in vcat $ zipWith (<+>) (map text aPadded) (map text bPaddedLeft)
+-- testDoc1 :: Doc
+-- testDoc1 =
+--   text "abc"
+--   $+$ text "defdefdefdef"
+--   $+$ text "ghi"
 
--- juxtapose :: Doc -> Doc -> Doc
--- juxtapose a b = 
---   let aLines = lines $ render a
---       bLines = lines $ render b
---       maxLength = max (length aLines) (length bLines)
---       maxALineLength = maximum $ map length aLines
---       padLines ls n = ls ++ replicate (n - length ls) ""
---       padRight str len = str ++ replicate (len - length str) ' '
---       aPadded = padLines aLines maxLength
---       aPaddedRight = map (\x -> padRight x maxALineLength) aPadded
---       bPadded = padLines bLines maxLength
---    in vcat $ zipWith (<+>) (map text aPaddedRight) (map text bPadded)
-
--- juxtapose :: Doc -> Doc -> Doc
--- juxtapose a b = 
---   let aLines = lines $ render a
---       bLines = lines $ render b
---       maxLength = max (length aLines) (length bLines)
---       padLines ls n = ls ++ replicate (n - length ls) ""
---       aPadded = padLines aLines maxLength
---       bPadded = padLines bLines maxLength
---    in vcat $ zipWith (<+>) (map text aPadded) (map text bPadded)
-
-testDoc1 :: Doc
-testDoc1 =
-  text "abc"
-  $+$ text "defdefdefdef"
-  $+$ text "ghi"
-
-testDoc2 :: Doc
-testDoc2 =
-  text "123"
-  $+$ text "456"
+-- testDoc2 :: Doc
+-- testDoc2 =
+--   text "123"
+--   $+$ text "456"
 
 -- abc
 -- defdefdefdef 123
 -- ghi          456
 
-
--- combineDocs :: Doc -> Doc -> Doc
--- combineDocs doc1 doc2 = vcat $ zipWith (<+>) (extendToLength l1 l2) (extendToLength l2 l1)
---   where
---     l1 = lines $ render doc1
---     l2 = lines $ render doc2
---     extendToLength xs ys = xs ++ replicate (length ys - length xs) empty
+clamp :: Int -> Int -> Int
+clamp x y = if y < x then x else y
 
 instance (Ppr (f a)) => Ppr (Derivation f a) where
   pprDoc (DerivationStep goal subtrees) =
     let goalDoc = pprDoc goal
         subtreeDocs = map pprDoc subtrees
-        width = max (size goalDoc) (sum (map size subtreeDocs))
+
+        spacing = hypothesisSpacing * clamp 0 (length subtrees - 1)
+
+        width = max (size goalDoc) (sum (map size subtreeDocs) + spacing)
     in
     foldr juxtapose mempty subtreeDocs
     $+$ hline width
