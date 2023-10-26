@@ -87,7 +87,7 @@ instance (Ppr b, Ppr a) => Ppr (Var b a) where
   pprDoc (M x) = pprDoc x
 
 data Meta_ b a where
-  MV :: a -> Meta_ t a
+  MV :: a -> Meta_ b a
   Lookup :: Meta_ b a -> Meta_ b a -> Meta_ b a -> Meta_ b a
   HasType :: Meta_ b a -> Meta_ b a -> Meta_ b a -> Meta_ b a
 
