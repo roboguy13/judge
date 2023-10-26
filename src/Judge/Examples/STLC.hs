@@ -290,10 +290,11 @@ instance Unify Type where
   getChildren = children
 
 instance Unify Term where
-  type UConst Term = Void
+  type UConst Term = Bool
   mkVar = VT
   getVar (VT x) = Just x
   getVar _ = Nothing
+  getConst (MkBool b) = Just b
   getConst _ = Nothing
   getChildren (Lam x body) = [VT x, body]
   getChildren x = children x
@@ -311,7 +312,7 @@ instance Unify Term where
 --
 --
 instance (Eq b, Data b) => Unify (Meta_ b) where
-  type UConst (Meta_ b) = b
+  type UConst (Meta_ b) = Either Bool b
 
   getVar (MV x) = Just x
   getVar (Tm x) = getVar =<< getM =<< getVar x
@@ -333,8 +334,9 @@ instance (Eq b, Data b) => Unify (Meta_ b) where
   getChildren (Tp x) = mkTp <$> getChildren x
   getChildren x = children x
 
-  getConst (Tm (VT (Obj x))) = Just x
-  getConst (Tp (TyV (Obj x))) = Just x
+  getConst (Tm (VT (Obj x))) = Just (Right x)
+  getConst (Tp (TyV (Obj x))) = Just (Right x)
+  getConst (Tm x) = Left <$> getConst x
   getConst _ = Nothing
 
   matchOne (Tm x) (Tm y) = map (bimap mkTm mkTm) <$> matchOne x y
@@ -545,6 +547,17 @@ test6 = query tcRules
   $ hasType empty
       (tm (App (Lam "f" (MkBool False)) (Lam "x" (MkBool True))))
       (mv (L.V "a"))
+
+test7 = query tcRules
+  $ hasType empty
+      (tm (App (Lam "f" (App "f" (MkBool False))) (Lam "x" "x")))
+      (mv (L.V "a"))
+
+test8 = query tcRules
+  $ hasType empty
+      (tm (Lam "f" (App "f" (MkBool False))))
+      (tp (Arr (Arr Bool Bool) Bool))
+
 
 data PprShow a = PprShow a
 

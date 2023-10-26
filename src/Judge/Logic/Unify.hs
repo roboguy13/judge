@@ -289,13 +289,14 @@ unifySubst subst x y
   | Just xC <- getConst @f x, Just yC <- getConst @f y =
       if xC == yC
       then Just subst
-      else
-        Nothing
+      else Nothing
         -- trace ("Cannot unify constants " ++ ppr x ++ " and " ++ ppr y) Nothing
-
   | Just xV <- getVar @f x = unifyVar @f @a subst xV y
 
   | Just yV <- getVar @f y = unifyVar subst yV x
+
+  | Just _ <- getConst @f x = Nothing
+  | Just _ <- getConst @f y = Nothing
 
   | Just paired <- matchOne @f x y =
       unifyList subst paired
