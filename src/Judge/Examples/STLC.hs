@@ -477,9 +477,9 @@ tcRules = map (toDebruijnRule . fmap L.V)
     :-
       [lookup "ctx" "y" "b"]
 
-  ,hasType "ctx" (Meta (mkTm (VT (Obj "x")))) "a" -- T-Var
+  ,hasType "ctx" (mv "x") "a" -- T-Var
     :-
-      [lookup "ctx" (Meta (mkTm (VT (Obj "x")))) "a"]
+      [lookup "ctx" (mv "x") "a"]
 
 
   ,fact $ hasType -- T-Unit
