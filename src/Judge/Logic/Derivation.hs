@@ -11,14 +11,11 @@ import Control.Monad.State
 -- import Data.Number.Nat -- Lazy naturals
 -- import Data.Number.Nat as N
 
-data Derivation f a =
+data Derivation t =
   DerivationStep
-    (f a)
-    [Derivation f a]
+    t
+    [Derivation t]
   deriving (Functor, Show)
-
-derivationMap1 :: (f a -> g b) -> Derivation f a -> Derivation g b
-derivationMap1 f (DerivationStep hd subtrees) = DerivationStep (f hd) (map (derivationMap1 f) subtrees)
 
 -- | The horizontal width
 --
@@ -95,7 +92,7 @@ centerBelow a b =
      else
        a $$ b
 
-instance (Ppr (f a)) => Ppr (Derivation f a) where
+instance (Ppr t) => Ppr (Derivation t) where
   pprDoc (DerivationStep goal subtrees) =
     let goalDoc = pprDoc goal
         subtreeDocs = map pprDoc subtrees
@@ -106,17 +103,4 @@ instance (Ppr (f a)) => Ppr (Derivation f a) where
     in
     foldr juxtapose mempty subtreeDocs
     $+$ centerBelow (hline width) goalDoc
-    -- let len = length $ ppr goal
-    -- in
-    -- $$ text (replicate len '-')
-    -- $$ pprDoc goal
-
-type DerivationBuilder f a =
-  [Derivation f a] -> Derivation f a
-
-buildLeaf :: DerivationBuilder f a -> Derivation f a
-buildLeaf builder = builder []
-
--- newtype Query f a b = Query (FreshT (State (DerivationUpdater f a)) b)
---   deriving (Functor, Applicative, Monad)
 

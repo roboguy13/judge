@@ -14,10 +14,14 @@ module Judge.Ppr
 
 import Text.PrettyPrint.HughesPJ
 
+import Unbound.Generics.LocallyNameless
+
 class Ppr a where
   pprDoc :: a -> Doc
 
 instance Ppr String where pprDoc = text
+
+instance Ppr (Name a) where pprDoc = text . show
 
 instance (Ppr a, Ppr b) => Ppr (Either a b) where
   pprDoc (Left x) = text "?" <.> pprDoc x

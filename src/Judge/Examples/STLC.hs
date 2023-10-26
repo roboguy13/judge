@@ -294,7 +294,7 @@ instance Unify Term where
   mkVar = VT
   getVar (VT x) = Just x
   getVar _ = Nothing
-  getConst (MkBool b) = Just b
+  -- getConst (MkBool b) = Just b
   getConst _ = Nothing
   getChildren (Lam x body) = [VT x, body]
   getChildren x = children x
@@ -334,9 +334,9 @@ instance (Eq b, Data b) => Unify (Meta_ b) where
   getChildren (Tp x) = mkTp <$> getChildren x
   getChildren x = children x
 
-  getConst (Tm (VT (Obj x))) = Just (Right x)
-  getConst (Tp (TyV (Obj x))) = Just (Right x)
-  getConst (Tm x) = Left <$> getConst x
+  -- getConst (Tm (VT (Obj x))) = Just (Right x)
+  -- getConst (Tp (TyV (Obj x))) = Just (Right x)
+  -- getConst (Tm x) = Left <$> getConst x
   getConst _ = Nothing
 
   matchOne (Tm x) (Tm y) = map (bimap mkTm mkTm) <$> matchOne x y
