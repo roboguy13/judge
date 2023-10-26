@@ -39,7 +39,7 @@ import Control.Lens.Plated
 
 -- (Meta {unMeta = HasType (Extend Empty (Tm (VT (Obj "x"))) (Tp Unit)) (Tm (VT (Obj "x"))) (MV (Left (Name (V "a") 25)))}) [DerivationStep (Meta {unMeta = Lookup (Extend Empty (Tm (VT (Obj "x"))) (Tp Unit)) (Tm (VT (Obj "x"))) (Tp Unit)}) []]]]
 
-data Type a = TyV a | Unit | Arr (Type a) (Type a)
+data Type a = TyV a | Bool | Unit | Arr (Type a) (Type a)
   deriving (Show, Functor, Foldable, Eq, Generic1, Traversable, Data)
 
 data Term a where
@@ -47,6 +47,7 @@ data Term a where
   App :: Term a -> Term a -> Term a
   Lam :: a -> Term a -> Term a
   MkUnit :: Term a
+  MkBool :: Bool -> Term a
   deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
 
 -- data Ctx a = CtxV a | Empty | Extend (Ctx a) a (Type (Ctx a))
@@ -142,6 +143,7 @@ instance Monad Term where
     x' <- f x
     Lam x' (body >>= f)
   MkUnit >>= _ = MkUnit
+  MkBool b >>= _ = MkBool b
 
 instance Applicative Type where
   pure = TyV
@@ -151,6 +153,7 @@ instance Monad Type where
   return = pure
   TyV x >>= f = f x
   Unit >>= _ = Unit
+  Bool >>= _ = Bool
   Arr x y >>= f = Arr (x >>= f) (y >>= f)
 
 -- instance Applicative Ctx where
@@ -212,7 +215,7 @@ instance (Ppr b, Ppr a) => Ppr [Meta t b a] where pprDoc xs = text "[" <.> foldr
 instance (Ppr b, Ppr a) => Ppr (Meta_ b a) where
   pprDoc (MV x) = pprDoc x
   pprDoc (Lookup ctx x a) =
-    parens (pprDoc x <+> text ":" <+> pprDoc a) <+> "∈" <+> pprDoc ctx
+    parens (pprDoc x <+> text ":" <+> pprDoc a) <+> text "∈" <+> pprDoc ctx
     -- pprDoc ctx <+> text "\\in" <+> pprDoc x <+> text ":" <+> pprDoc a
   pprDoc (HasType ctx t a) =
     pprDoc ctx <+> text "|-" <+> pprDoc t <+> text ":" <+> pprDoc a
@@ -225,6 +228,7 @@ instance (Ppr b, Ppr a) => Ppr (Meta_ b a) where
 instance Ppr a => Ppr (Type a) where
   pprDoc (TyV x) = pprDoc x
   pprDoc Unit = text "Unit"
+  pprDoc Bool = text "Bool"
   pprDoc (Arr x y) =
     text "Arr" <.> text "(" <.> pprDoc x <.> text "," <+> pprDoc y <.> text ")"
 
@@ -239,6 +243,7 @@ instance Ppr a => Ppr (Term a) where
   pprDoc (App x y) = parens (pprDoc x) <+> pprDoc y
   pprDoc (Lam x body) = text "\\" <.> pprDoc x <.> text "." <+> pprDoc body
   pprDoc MkUnit = text "MkUnit"
+  pprDoc (MkBool b) = text (show b)
 --
 -- instance Ppr a => Ppr [Meta a] where
 --   pprDoc xs =
@@ -468,11 +473,11 @@ tcRules = map (toDebruijnRule . fmap L.V)
   [fact $ lookup (extend "ctx" "x" "a") "x" "a"
   ,lookup (extend "ctx" "x" "a") "y" "b"
     :-
-    [lookup "ctx" "y" "b"]
+      [lookup "ctx" "y" "b"]
 
-  ,hasType "ctx" (Meta (mkTm (VT (Obj "x")))) "a"
+  ,hasType "ctx" (Meta (mkTm (VT (Obj "x")))) "a" -- T-Var
     :-
-    [lookup "ctx" (Meta (mkTm (VT (Obj "x")))) "a"]
+      [lookup "ctx" (Meta (mkTm (VT (Obj "x")))) "a"]
 
 
   ,fact $ hasType -- T-Unit
@@ -480,17 +485,20 @@ tcRules = map (toDebruijnRule . fmap L.V)
 
   ,hasType "ctx" (tm'' (App "x" "y")) "b" -- T-App
     :-
-    [hasType "ctx" "y" "a"
-    ,hasType "ctx" "x" (tp'' (Arr "a" "b"))
-    ]
+      [hasType "ctx" "y" "a"
+      ,hasType "ctx" "x" (tp'' (Arr "a" "b"))
+      ]
 
   ,hasType "ctx" (tm'' (Lam "x" "body")) (tp'' (Arr "a" "b")) -- T-Lam
     :-
-    [hasType
-      (extend "ctx" "x" "a")
-      "body"
-      "b"
-    ]
+      [hasType
+        (extend "ctx" "x" "a")
+        "body"
+        "b"
+      ]
+
+  ,fact $ hasType "ctx" (tm'' (MkBool False)) (tp'' Bool)
+  ,fact $ hasType "ctx" (tm'' (MkBool True)) (tp'' Bool)
   ]
 
 -- TODO: Look into what generates the goal that leads to this unification.
@@ -532,6 +540,11 @@ test3 = inferType (App (Lam "x" "x") MkUnit)
 test4 = inferType (App (Lam "x" MkUnit) MkUnit)
 
 test5 = query tcRules $ hasType empty (tm (App (Lam "x" "x") MkUnit)) (mv (L.V "a"))
+
+test6 = query tcRules
+  $ hasType empty
+      (tm (App (Lam "f" (MkBool False)) (Lam "x" (MkBool True))))
+      (mv (L.V "a"))
 
 data PprShow a = PprShow a
 

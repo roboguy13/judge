@@ -80,6 +80,7 @@ x <++> y = x <.> text (replicate hypothesisSpacing ' ') <.> y
 clamp :: Int -> Int -> Int
 clamp x y = if y < x then x else y
 
+-- TODO: Find a better way
 centerBelow :: Doc -> Doc -> Doc
 centerBelow a b =
   let aStr = render a
