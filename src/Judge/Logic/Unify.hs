@@ -36,11 +36,9 @@ import Data.Void
 import Debug.Trace
 
 doOccursCheck :: Bool
-doOccursCheck = True --False
+doOccursCheck = True
 
 data UnifyVar a = UnifyVar (Maybe a) Int
-
--- TODO: Use unbound-generics?
 
 data Pair a = Pair a a deriving (Functor, Foldable, Traversable)
 
@@ -65,13 +63,9 @@ class (Functor f, Substitute f, Eq (UConst f)) => Unify f where
 
   getConst :: f a -> Maybe (UConst f)
 
-  matchOne :: Data a => f a -> f a -> Maybe [(f a, f a)] -- If the constructors match, give back the children for each
-  -- matchOneTree :: f a -> f a -> Maybe (f (a, a))
+  matchOne :: Data a => f a -> f a -> Maybe [(f a, f a)] -- | If the constructors match, give back the children for each
 
   getChildren :: Data a => f a -> [f a]
-
-  -- default matchOneTree :: (Generic1 f, GUnify (Rep1 f)) => f a -> f a -> Maybe (f (a, a))
-  -- matchOneTree x y = to1 <$> gmatchOne (from1 x) (from1 y)
 
   default matchOne :: (Data a, Data (f a), Plated (f a)) => f a -> f a -> Maybe [(f a, f a)]
   matchOne x y =
@@ -81,51 +75,6 @@ class (Functor f, Substitute f, Eq (UConst f)) => Unify f where
 
 class Substitute f where
   applySubst :: (HasCallStack, Show a, Eq a) => Subst f a -> f a -> f a
-
-  -- default applySubst :: (HasCallStack, Show a, Eq a, Generic1 f, Substitute (Rep1 f)) => Subst f a -> f a -> f a
-  -- applySubst subst x = to1 $ applySubst (mapSubstRhs from1 subst) $ from1 x
-
--- instance Substitute f => Substitute (M1 i c f) where
---   applySubst subst (M1 x) = M1 $ applySubst (mapSubstRhs unM1 subst) x
---
--- instance Substitute U1 where
---   applySubst _ U1 = U1
---
--- instance Substitute (K1 i c) where
---   applySubst _ (K1 a) = K1 a
---
--- instance (Substitute f, Substitute g) => Substitute (f :+: g) where
---   applySubst subst (L1 a) = L1 $ applySubst (mapMaybeSubst go subst) a
---     where
---       go :: a -> (f :+: g) a -> Maybe (a, f a)
---       go x (L1 y) = Just (x, y)
---       go x (R1 y) = Just (x, _ y)
---   applySubst subst (R1 b) = R1 $ applySubst (mapMaybeSubst go subst) b
---     where
---       go x (R1 y) = Just (x, y)
---       go _ _ = Nothing
---
--- instance (Substitute f, Substitute g) => Substitute (f :*: g) where
---   applySubst subst (x :*: y) =
---       applySubst (mapSubstRhs proj1 subst) x :*: applySubst (mapSubstRhs proj2 subst) y
---     where
---       proj1 (x :*: _) = x
---       proj2 (_ :*: y) = y
---
--- instance (forall z. Eq z => Eq (g z), forall z. Show z => Show (g z), Applicative g, Substitute f, Substitute g) => Substitute (f :.: g) where
---   applySubst subst (Comp1 x) = Comp1 $ applySubst (mapMaybeSubst go subst) x
---     where
---       go :: a -> (f :.: g) a -> Maybe (g a, f (g a))
---       go a (Comp1 b) = Just (pure a, b)
---
--- instance (Substitute f) => Substitute (Rec1 f) where
---   applySubst subst (Rec1 x) = Rec1 $ applySubst (mapSubstRhs unRec1 subst) x
---
--- instance Substitute Par1 where
---   applySubst subst (Par1 x) =
---     case substLookup subst x of
---       Nothing -> error $ "applySubst: " ++ show x ++ "\n^--> " ++ show subst
---       Just y -> y
 
 newtype Subst f a = Subst [(a, f a)]
   deriving (Show, Functor, Foldable, Traversable)
@@ -162,14 +111,6 @@ mapSubstRhs f (Subst xs) = Subst (map (fmap f) xs)
 mapMaybeSubst :: (a -> f a -> Maybe (b, g b)) -> Subst f a -> Subst g b
 mapMaybeSubst f (Subst xs) = Subst (mapMaybe (uncurry f) xs)
 
--- applySubst :: (Unify f, Eq a) => Subst f a -> f a -> f a
--- applySubst subst x
---   | Just xV <- getVar x =
---       case substLookup subst xV of
---         Nothing -> error $ "applySubst"
---         Just y -> y
---   | otherwise = 
-
 type UnifyC f a = (Ppr a, Eq a, Unify f, Traversable f, Plated (f a), Data a, Monad f, Show a, Show (f a))
 
 applyDisjointSubst_Right :: (Show b, Substitute f, Traversable f, Eq b, Show (f b)) =>
@@ -193,13 +134,8 @@ applySubstRec subst x =
   if notDone
     then applySubstRec subst y
     else y
-  -- case getVar y of
-  --   Just yV
-  --     | Just xV <- getVar x, yV == xV -> y
-  --     | otherwise -> applySubstRec subst y
-  --   Nothing -> y
 
--- Use the variables from the first Subst in the result and
+-- | Use the variables from the first Subst in the result and
 -- use the second Subst to (recursively) substitute for variables
 -- in the RHS's of the first Subst
 simplifySubst :: (Eq a, Unify f, Monad f) => Subst f a -> Subst f a -> Subst f a
@@ -305,10 +241,6 @@ unifySubst subst x y
       -- trace ("Cannot unify " ++ ppr x ++ " and " ++ ppr y) Nothing
       Nothing
 
--- unifyPaired :: forall f a. (Ppr (f a), UnifyC f a) => Subst f a -> f (a, a) -> Maybe (Subst f a)
--- unifyPaired subst = fmap concatSubst . traverse (\(x, y) ->
---   unifySubst subst (mkVar x) (mkVar y))
-
 concatSubst :: Foldable f => f (Subst f a) -> Subst f a
 concatSubst = mconcat . toList
 
@@ -329,9 +261,6 @@ unifyVar subst xV y
       if occursCheck xV yInst
         then Nothing
         else unifySubst @f subst (mkVar @f xV) yInst
-      -- newSubst <- unifySubst @s @f subst (mkVar @s @f xV) yInst
-      -- extendSubst newSubst yV (mkVar xV)
-      -- extendSubst newSubst xV (mkVar yV)
 
   | otherwise =
       extendSubst subst xV y
