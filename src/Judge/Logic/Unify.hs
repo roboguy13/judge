@@ -7,11 +7,13 @@
 {-# LANGUAGE QuantifiedConstraints #-}
 {-# LANGUAGE UndecidableInstances #-}
 {-# LANGUAGE DerivingStrategies #-}
+{-# LANGUAGE LambdaCase #-}
 
 module Judge.Logic.Unify
   where
 
 import Judge.Ppr
+import Judge.Logic.ConstrEq
 
 import Data.Kind
 -- import Control.Lens.Plated
@@ -29,6 +31,8 @@ import Control.Lens.Plated
 import Control.Lens hiding (getConst)
 
 import Control.Applicative hiding (Const, getConst)
+import Control.Monad
+import Control.Monad.Trans
 
 import Data.Data
 
@@ -52,15 +56,17 @@ doOccursCheck = True
 class (Alpha t, Typeable t, Subst t t) => Unify t where
   mkVar :: Name t -> t
 
-  matchOne :: t -> t -> Maybe [(t, t)] -- | If the constructors match, give back the children for each
+  matchOne :: Fresh m => t -> t -> m (Maybe [(t, t)]) -- | If the constructors match, give back the children for each
 
-  getChildren :: t -> [t]
+    -- The Fresh m is for generating fresh names for binders
+  getChildren :: Fresh m => t -> m [t]
 
-  default matchOne :: Data t => t -> t -> Maybe [(t, t)]
+  default matchOne :: (Generic t, GConstrEq (Rep t), Fresh m) => t -> t -> m (Maybe [(t, t)])
   matchOne x y =
-    if toConstr x == toConstr y
-    then Just $ zip (getChildren x) (getChildren y)
-    else Nothing
+    -- if toConstr x == toConstr y
+    if constrEq x y
+    then Just <$> liftA2 zip (getChildren x) (getChildren y)
+    else pure Nothing
 
 getVar :: forall t. Subst t t => t -> Maybe (Name t)
 getVar x =
@@ -111,16 +117,16 @@ applySubstRec subst x =
     then applySubstRec subst y
     else y
 
-extendSubst :: (Unify t, Ppr t, Plated t) => Substitution t -> Name t -> t -> Maybe (Substitution t)
+extendSubst :: (Unify t, Ppr t, Plated t) => Substitution t -> Name t -> t -> FreshMT Maybe (Substitution t)
 extendSubst subst v x =
   case substLookup subst v of
     Nothing ->
       let oneSubst = singleSubst v x
           r = oneSubst <> subst --simplifySubst oneSubst subst
       in
-      Just r
+      lift $ Just r
       -- trace ("extendSubst: " ++ ppr v ++ ", " ++ ppr x ++ " ---> " ++ show r) r
-    Just y -> unifySubst subst x y
+    Just y -> unifySubst' subst x y
 
 combineSubsts :: [Substitution t] -> Substitution t
 combineSubsts = mconcat
@@ -129,42 +135,45 @@ unify :: forall t. (Ppr t, UnifyC t, Plated t) => t -> t -> Maybe (Substitution 
 unify = unifySubst mempty
 
 unifySubst :: forall t. (Ppr t, UnifyC t, Plated t) => Substitution t -> t -> t -> Maybe (Substitution t)
-unifySubst subst x y
+unifySubst subst x y = runFreshMT $ unifySubst' subst x y
+
+unifySubst' :: forall t. (Ppr t, UnifyC t, Plated t) => Substitution t -> t -> t -> FreshMT Maybe (Substitution t)
+unifySubst' subst x y
   | Just xV <- getVar @t x = unifyVar subst xV y
 
   | Just yV <- getVar @t y = unifyVar subst yV x
 
-  | Just paired <- matchOne @t x y =
-      unifyList subst paired
-
   | otherwise =
-      -- trace ("Cannot unify " ++ ppr x ++ " and " ++ ppr y) Nothing
-      Nothing
+      matchOne @t x y >>= \case
+        Just paired -> unifyList subst paired
+        Nothing -> lift Nothing
 
-unifyList :: forall t. (Ppr t, UnifyC t, Plated t) => Substitution t -> [(t, t)] -> Maybe (Substitution t)
-unifyList subst [] = Just subst
+unifyList :: forall t. (Ppr t, UnifyC t, Plated t) => Substitution t -> [(t, t)] -> FreshMT Maybe (Substitution t)
+unifyList subst [] = lift $ Just subst
 unifyList subst ((x, y) : rest) = do
-  subst' <- unifySubst subst x y
+  subst' <- unifySubst' subst x y
   -- () <- traceM $ show subst ++ " ===> " ++ show subst'
   unifyList subst' rest
 
-unifyVar :: forall t. (Ppr t, UnifyC t, Plated t) => Substitution t -> Name t -> t -> Maybe (Substitution t)
-unifyVar subst xV y
-  -- | trace ("unifyVar " ++ ppr xV ++ " and " ++ ppr y) False = undefined
-  | occursCheck xV y = Nothing
-
-  | Just yV <- getVar @t y, Just yInst <- substLookup subst yV =
-      -- trace ("unify " ++ ppr xV ++ " and " ++ ppr yInst) $
-      if occursCheck xV yInst
-        then Nothing
-        else unifySubst @t subst (mkVar @t xV) yInst
-
-  | otherwise =
-      extendSubst subst xV y
-
-occursCheck :: (UnifyC t, Alpha t, Plated t) => Name t -> t -> Bool
+unifyVar :: forall t. (Ppr t, UnifyC t, Plated t) => Substitution t -> Name t -> t -> FreshMT Maybe (Substitution t)
+unifyVar subst xV y =
+    occursCheck xV y >>= \case
+      True -> lift Nothing
+      False ->
+        case getVar @t y of
+          Just yV -> case substLookup subst yV of
+                        Just yInst ->
+                          occursCheck xV yInst >>= \case
+                            True -> lift Nothing
+                            False -> unifySubst' @t subst (mkVar @t xV) yInst
+                        Nothing -> extendSubst subst xV y
+          Nothing -> extendSubst subst xV y
+        
+occursCheck :: (Fresh m, UnifyC t, Alpha t, Plated t) => Name t -> t -> m Bool
 occursCheck v x
-  | not doOccursCheck = False
-  | Just xV <- getVar x = xV `aeq` v -- TODO: Is this right?
-  | otherwise = any (occursCheck v) $ getChildren x
+  | not doOccursCheck = pure False
+  | Just xV <- getVar x = pure $ xV `aeq` v -- TODO: Is this right?
+  | otherwise = do
+      xs <- getChildren x >>= traverse (occursCheck v)
+      pure $ or xs
 

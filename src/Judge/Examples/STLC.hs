@@ -6,6 +6,7 @@
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RoleAnnotations #-}
 
 module Judge.Examples.STLC
   where
@@ -16,9 +17,9 @@ import Prelude hiding (lookup)
 -- import Judge.Vec
 import Judge.Logic.Logic hiding (V (..), LTerm (..))
 import Judge.Logic.Unify
+import Judge.Logic.ConstrEq
 import Judge.Ppr
 import qualified Judge.Logic.Logic as L
-import Judge.Logic.Name
 
 import GHC.Generics hiding (Meta)
 
@@ -28,6 +29,7 @@ import Data.Bifunctor
 import Data.String
 
 import Control.Monad
+import Control.Applicative hiding (empty)
 
 import Data.Maybe
 import Data.Void
@@ -35,184 +37,198 @@ import Data.Coerce
 
 import Control.Lens.Plated
 
--- import Unbound.Generics.LocallyNameless
+import Unbound.Generics.LocallyNameless
+import Unbound.Generics.LocallyNameless.Unsafe
 
 -- (Meta {unMeta = HasType (Extend Empty (Tm (VT (Obj "x"))) (Tp Unit)) (Tm (VT (Obj "x"))) (MV (Left (Name (V "a") 25)))}) [DerivationStep (Meta {unMeta = Lookup (Extend Empty (Tm (VT (Obj "x"))) (Tp Unit)) (Tm (VT (Obj "x"))) (Tp Unit)}) []]]]
 
-data Type a = TyV a | Bool | Unit | Arr (Type a) (Type a)
-  deriving (Show, Functor, Foldable, Eq, Generic1, Traversable, Data)
+type TypeName = Name Type
+type TermName = Name Term
 
-data Term a where
-  VT :: a -> Term a
-  App :: Term a -> Term a -> Term a
-  Lam :: a -> Term a -> Term a
-  MkUnit :: Term a
-  MkBool :: Bool -> Term a
-  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
+data Type = TyV TypeName | Bool | Unit | Arr Type Type
+  deriving (Show, Generic)
 
--- data Ctx a = CtxV a | Empty | Extend (Ctx a) a (Type (Ctx a))
---   deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
+data Term where
+  VT :: TermName -> Term
+  App :: Term -> Term -> Term
+  Lam :: Bind TermName Term -> Term
+  MkUnit :: Term
+  MkBool :: Bool -> Term
+  deriving (Show, Generic)
 
-data Var b a = Obj b | M a
-  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
+lam :: String -> Term -> Term
+lam x = Lam . bind (string2Name x)
 
-instance Bifunctor Var where
-  bimap f _ (Obj x) = Obj (f x)
-  bimap _ g (M x) = M (g x)
+instance Alpha Type
+instance Alpha Term
 
-instance Applicative (Var b) where
-  pure = M
-  (<*>) = ap
+instance Subst Type Type where
+  isvar (TyV x) = Just $ SubstName x
+  isvar _ = Nothing
 
-instance Monad (Var b) where
-  return = pure
-  Obj x >>= _ = Obj x
-  M x >>= f = f x
+instance Subst Term Term where
+  isvar (VT x) = Just $ SubstName x
+  isvar _ = Nothing
 
-instance (Ppr b, Ppr a) => Ppr (Var b a) where
-  pprDoc (Obj x) = pprDoc x
-  pprDoc (M x) = pprDoc x
+instance Plated Type where
+  plate f = \case
+    TyV x -> pure $ TyV x
+    Bool -> pure Bool
+    Unit -> pure Unit
+    Arr x y -> Arr <$> f x <*> f y
 
-data Meta_ b a where
-  MV :: a -> Meta_ b a
-  Lookup :: Meta_ b a -> Meta_ b a -> Meta_ b a -> Meta_ b a
-  HasType :: Meta_ b a -> Meta_ b a -> Meta_ b a -> Meta_ b a
+instance Plated Term where
+  plate f = \case
+    VT x -> pure $ VT x
+    App x y -> App <$> f x <*> f y
+    Lam bnd ->
+      let (vs, body) = unsafeUnbind bnd
+      in
+      Lam <$> (bind vs <$> f body)
+    MkUnit -> pure MkUnit
+    MkBool b -> pure $ MkBool b
 
-  Empty :: Meta_ b a
-  Extend :: Meta_ b a -> Meta_ b a -> Meta_ b a -> Meta_ b a
-  Tp :: Type (Var b (Meta_ b a)) -> Meta_ b a
-  Tm :: Term (Var b (Meta_ b a)) -> Meta_ b a
-  deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
+data Meta_ where
+  MV :: Name Meta_ -> Meta_
+  Lookup :: Meta_ -> Meta_ -> Meta_ -> Meta_
+  HasType :: Meta_ -> Meta_ -> Meta_ -> Meta_
 
-mkTp :: Type (Var b (Meta_ b a)) -> Meta_ b a
-mkTp (TyV (M x)) = x
-mkTp x = Tp x
+  Empty :: Meta_
+  Extend :: Meta_ -> Meta_ -> Meta_ -> Meta_
+  Tp :: Type -> Meta_
+  Tm :: Term -> Meta_
+  deriving (Show, Generic)
 
-mkTm :: Term (Var b (Meta_ b a)) -> Meta_ b a
-mkTm (VT (M x)) = x
-mkTm x = Tm x
+instance Subst Meta_ Meta_ where
+  isvar (MV x) = Just $ SubstName x
+  isvar _ = Nothing
 
-normalizeMeta_ :: Meta_ b a -> Meta_ b a
-normalizeMeta_ (Tp x) = mkTp (fmap (fmap normalizeMeta_) x)
-normalizeMeta_ (Tm x) = mkTm (fmap (fmap normalizeMeta_) x)
-normalizeMeta_ (MV x) = MV x
-normalizeMeta_ (Lookup x y z) = Lookup (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
-normalizeMeta_ (HasType x y z) = HasType (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
-normalizeMeta_ (Extend x y z) = Extend (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
-normalizeMeta_ Empty = Empty
+instance Subst Meta_ Type where
+  isCoerceVar (TyV x) = Just $ SubstCoerce (coerce x) go
+    where
+      go (Tp t) = Just t
+      go (MV x) = Just $ TyV (coerce x)
+      go _ = Nothing
 
-normalizeMeta :: Meta t b a -> Meta t b a
-normalizeMeta (Meta x) = Meta $ normalizeMeta_ x
+instance Subst Meta_ Term where
+  isCoerceVar (VT x) = Just $ SubstCoerce (coerce x) go
+    where
+      go (Tm t) = Just t
+      go (MV x) = Just $ VT (coerce x)
+      go _ = Nothing
+  isCoerceVar _ = Nothing
 
-instance Normalize (Meta t b) where normalize = normalizeMeta
--- (Meta {unMeta = HasType (Extend Empty (Tm (V (Obj "x"))) (Tp Unit)) (Tm (V (Obj "x"))) (MV (Left (Name (V "a") 25)))})
+instance Plated Meta_ where
+  plate f = \case
+    MV x -> pure $ MV x
+    Lookup x y z -> Lookup <$> f x <*> f y <*> f z
+    HasType x y z -> HasType <$> f x <*> f y <*> f z
+    Empty -> pure Empty
+    Extend x y z -> Extend <$> f x <*> f y <*> f z
+    Tp ty -> pure $ Tp ty
+    Tm x -> pure $ Tm x
+
+
+-- mkTp :: Type (Var b (Meta_ b a)) -> Meta_ b a
+-- mkTp (TyV (M x)) = x
+-- mkTp x = Tp x
+--
+-- mkTm :: Term (Var b (Meta_ b a)) -> Meta_ b a
+-- mkTm (VT (M x)) = x
+-- mkTm x = Tm x
+--
+-- normalizeMeta_ :: Meta_ b a -> Meta_ b a
+-- normalizeMeta_ (Tp x) = mkTp (fmap (fmap normalizeMeta_) x)
+-- normalizeMeta_ (Tm x) = mkTm (fmap (fmap normalizeMeta_) x)
+-- normalizeMeta_ (MV x) = MV x
+-- normalizeMeta_ (Lookup x y z) = Lookup (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
+-- normalizeMeta_ (HasType x y z) = HasType (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
+-- normalizeMeta_ (Extend x y z) = Extend (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
+-- normalizeMeta_ Empty = Empty
+--
+-- normalizeMeta :: Meta t b a -> Meta t b a
+-- normalizeMeta (Meta x) = Meta $ normalizeMeta_ x
+--
+-- instance Normalize (Meta t b) where normalize = normalizeMeta
+-- -- (Meta {unMeta = HasType (Extend Empty (Tm (V (Obj "x"))) (Tp Unit)) (Tm (V (Obj "x"))) (MV (Left (Name (V "a") 25)))})
+
 data MSort = MJudgment | MCtx | MTp | MTm | MName
+  deriving (Typeable)
 
-newtype Meta t b a = Meta { unMeta :: Meta_ b a }
-  deriving (Functor, Applicative, Substitute, Unify, Monad, Foldable, Eq, Traversable, Show)
+newtype Meta t = Meta { unMeta :: Meta_ }
+  deriving (Functor, Show, Generic)
 
--- instance (Show b, Show a) => Show (Meta t b a) where show (Meta x) = show x
-
-instance (Data b, Data a) => Plated (Meta t b a) where
-  plate :: forall f. Applicative f => (Meta t b a -> f (Meta t b a)) -> Meta t b a -> f (Meta t b a)
+instance Plated (Meta t) where
   plate f (Meta x) =
-    let f' :: Meta_ b a -> f (Meta_ b a)
-        f' = fmap unMeta . f . Meta
-    in
-    Meta <$> plate f' x
-instance (Data b, Data a) => Plated (Meta_ b a)
+    Meta <$> plate (fmap unMeta . f . Meta) x
 
-instance Data a => Plated (Type a)
-instance Data a => Plated (Term a)
--- instance Data a => Plated (Ctx a)
--- instance Plated (Meta a) where
---   plate f (MV x) = pure (MV x)
---   plate f (Lookup ctx x a) =
---     Lookup <$> fmap CtxV (f (Ctx ctx)) <*> f x <*> fmap TyV (f (Tp a))
---   plate f (Tm x) = Tm _
---
-instance Applicative Term where
-  pure = VT
-  (<*>) = ap
+instance Alpha Meta_
 
-instance Monad Term where
-  return = pure
-  VT x >>= f = f x
-  App x y >>= f = App (x >>= f) (y >>= f)
-  Lam x body >>= f = do
-    x' <- f x
-    Lam x' (body >>= f)
-  MkUnit >>= _ = MkUnit
-  MkBool b >>= _ = MkBool b
+instance Alpha (Meta t)
+instance Subst (Meta t) (Meta t) where
+  isvar (Meta (MV x)) = Just (SubstName (coerce x)) -- TODO: Is this right?
+  isvar _ = Nothing
 
-instance Applicative Type where
-  pure = TyV
-  (<*>) = ap
-
-instance Monad Type where
-  return = pure
-  TyV x >>= f = f x
-  Unit >>= _ = Unit
-  Bool >>= _ = Bool
-  Arr x y >>= f = Arr (x >>= f) (y >>= f)
-
--- instance Applicative Ctx where
---   pure = CtxV
---   (<*>) = ap
-
--- instance Monad Ctx where
---   return = pure
---   CtxV x >>= f = f x
---   Empty >>= _ = Empty
---   Extend ctx x a >>= f = do
---     x' <- f x
---     let a' = a >>= (TyV . (>>= f)) -- TODO: Does this make sense?
---     Extend (ctx >>= f) x' a'
-
--- instance Applicative Term where
---   pure = V
---   App f g <*> App x y = App (f <*> x) (g <*> y)
---   Lam x 
-
-  -- Tp :: Type (Meta a) -> Meta a
-  -- Tm :: Term (Meta a) -> Meta a
---
--- mkV x = V (MV x)
--- mkTyV x = TyV (MV x)
--- mkCtxV x = CtxV (MV x)
---
--- -- instance IsString (Meta String) where fromString = MV
--- -- instance IsString (Term (Meta String)) where fromString = mkV
--- -- instance IsString (Type (Meta String)) where fromString = mkTyV
--- -- instance IsString (Ctx (Meta String)) where fromString = mkCtxV
---
-instance Applicative (Meta_ b) where
-  pure = MV
-  (<*>) = ap
-
-instance Monad (Meta_ b) where
-  MV x >>= f = f x
-  Lookup ctx x a >>= f = Lookup (ctx >>= f) (x >>= f) (a >>= f)
-  Extend ctx x a >>= f = Extend (ctx >>= f) (x >>= f) (a >>= f)
-  HasType ctx t a >>= f = HasType (ctx >>= f) (t >>= f) (a >>= f)
-
-  Tm x >>= f = mkTm $ fmap go x
+instance Subst (Meta t) Type where
+  isCoerceVar (TyV x) = Just $ SubstCoerce (coerce x) go
     where
-      go (Obj x) = Obj x
-      go (M x) = M $ x >>= f
+      go (Meta (Tp t)) = Just t
+      go (Meta (MV x)) = Just $ TyV (coerce x)
+      go _ = Nothing
+  isCoerceVar _ = Nothing
 
-  Tp x >>= f = mkTp $ fmap go x
+instance Subst (Meta t) Term where
+  isCoerceVar (VT x) = Just $ SubstCoerce (coerce x) go
     where
-      go (Obj x) = Obj x
-      go (M x) = M $ x >>= f
+      go (Meta (Tm t)) = Just t
+      go (Meta (MV x)) = Just $ VT (coerce x)
+      go _ = Nothing
+  isCoerceVar _ = Nothing
 
-  Empty >>= _ = Empty
+instance Subst (Meta t) Meta_ where
+  isCoerceVar (MV x) = Just $ SubstCoerce (coerce x) (Just . coerce)
+  isCoerceVar _ = Nothing
 
-instance (Ppr b, Ppr a) => Ppr (Meta t b a) where pprDoc (Meta x) = pprDoc x
+type MetaName t = Name (Meta t)
 
-instance (Ppr b, Ppr a) => Ppr [Meta t b a] where pprDoc xs = text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
+instance Unify Type where
+  mkVar = TyV
+  getChildren = pure . children
 
-instance (Ppr b, Ppr a) => Ppr (Meta_ b a) where
+instance Unify Term where
+  mkVar = VT
+  getChildren (Lam bnd) = do
+    (x, body) <- unbind bnd
+    pure [VT x, body]
+  getChildren x = pure $ children x
+
+instance forall k (t :: k). (Typeable k, Typeable t) => Unify (Meta t) where
+  mkVar = Meta . MV . coerce
+
+  getChildren (Meta x) = coerce <$> getChildren x
+  matchOne (Meta x) (Meta y) = coerce <$> matchOne x y
+
+instance Unify Meta_ where
+  mkVar = MV
+
+  getChildren (Tm x) = fmap Tm <$> getChildren x
+  getChildren (Tp x) = fmap Tp <$> getChildren x
+  getChildren x = pure $ children x
+
+  matchOne (Tm x) (Tm y) = fmap (map (bimap Tm Tm)) <$> matchOne x y
+  matchOne (Tp x) (Tp y) = fmap (map (bimap Tp Tp)) <$> matchOne x y
+  matchOne x y =
+    if constrEq x y
+    then Just <$> liftA2 zip (getChildren x) (getChildren y)
+    else pure Nothing
+
+instance Normalize (Meta t) where normalize = id
+
+instance Ppr (Meta t) where pprDoc (Meta x) = pprDoc x
+
+instance Ppr [Meta t] where pprDoc xs = text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
+
+instance Ppr Meta_ where
   pprDoc (MV x) = pprDoc x
   pprDoc (Lookup ctx x a) =
     parens (pprDoc x <+> text ":" <+> pprDoc a) <+> text "∈" <+> pprDoc ctx
@@ -225,7 +241,7 @@ instance (Ppr b, Ppr a) => Ppr (Meta_ b a) where
   pprDoc (Extend ctx x a) =
     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
 
-instance Ppr a => Ppr (Type a) where
+instance Ppr Type where
   pprDoc (TyV x) = pprDoc x
   pprDoc Unit = text "Unit"
   pprDoc Bool = text "Bool"
@@ -238,240 +254,74 @@ instance Ppr a => Ppr (Type a) where
 --   pprDoc (Extend ctx x a) =
 --     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
 
-instance Ppr a => Ppr (Term a) where
+instance Ppr Term where
   pprDoc (VT x) = pprDoc x
   pprDoc (App x y) = parens (pprDoc x) <+> pprDoc y
-  pprDoc (Lam x body) = text "\\" <.> pprDoc x <.> text "." <+> pprDoc body
+  pprDoc (Lam bnd) = 
+    let (x, body) = unsafeUnbind bnd
+    in
+    text "\\" <.> pprDoc x <.> text "." <+> pprDoc body
   pprDoc MkUnit = text "MkUnit"
   pprDoc (MkBool b) = text (show b)
---
--- instance Ppr a => Ppr [Meta a] where
---   pprDoc xs =
---     text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
---
-instance Substitute Type where
-  applySubst subst = (>>= go)
-    where
-      go x =
-        case substLookup subst x of
-          Just r -> r
-          Nothing -> TyV x --error $ "Type applySubst: " ++ show x
 
-instance Substitute Term where
-  applySubst subst = (>>= go)
-    where
-      go x =
-        case substLookup subst x of
-          Just r -> r
-          Nothing -> VT x --error $ "Term applySubst: " ++ show x
+class MetaC t a where
+  getMeta :: a -> Meta t
 
-instance Substitute (Meta_ b) where
-  applySubst subst = (>>= go)
-    where
-      go x =
-        case substLookup subst x of
-          Just r -> r
-          Nothing -> MV x --error $ "Meta_ applySubst: " ++ show x ++ "\n^--> " ++ show subst
-  -- applySubst subst = \case
-  --   MV x -> case substLookup subst x of
-  --             Just t -> t
-  --             Nothing -> MV x
-  --   Lookup ctx x a ->
-  --     Lookup (fmap (applySubst subst) ctx) (applySubst subst x) (fmap (applySubst subst) a)
-  --   HasType ctx t a ->
-  --     HasType (fmap (applySubst subst) ctx) (fmap (applySubst subst) t) (fmap (applySubst subst) a)
+instance MetaC t (Meta t) where getMeta = id
+instance MetaC t String where getMeta = Meta . MV . string2Name
 
-instance Unify Type where
-  type UConst Type = Void
-  mkVar = TyV
-  getVar (TyV x) = Just x
-  getVar _ = Nothing
-  getConst _ = Nothing
-  getChildren = children
-
-instance Unify Term where
-  type UConst Term = Bool
-  mkVar = VT
-  getVar (VT x) = Just x
-  getVar _ = Nothing
-  -- getConst (MkBool b) = Just b
-  getConst _ = Nothing
-  getChildren (Lam x body) = [VT x, body]
-  getChildren x = children x
---
--- instance Unify Ctx where
---   type UConst Ctx = Void
---   mkVar = CtxV
---   getVar (CtxV x) = Just x
---   getVar _ = Nothing
---   getConst _ = Nothing
---
--- instance Substitute Type
--- instance Substitute Term
--- instance Substitute Ctx
---
---
-instance (Eq b, Data b) => Unify (Meta_ b) where
-  type UConst (Meta_ b) = Either Bool b
-
-  getVar (MV x) = Just x
-  getVar (Tm x) = getVar =<< getM =<< getVar x
-    where
-      getM (M x) = Just x
-      getM (Obj _) = Nothing
-
-  getVar (Tp x) = getVar =<< getM =<< getVar x
-    where
-      getM (M x) = Just x
-      getM (Obj _) = Nothing
-
-  -- getVar (Ctx x) = getVar =<< getVar x
-  getVar _ = Nothing
-
-  mkVar = MV
-
-  getChildren (Tm x) = mkTm <$> getChildren x
-  getChildren (Tp x) = mkTp <$> getChildren x
-  getChildren x = children x
-
-  -- getConst (Tm (VT (Obj x))) = Just (Right x)
-  -- getConst (Tp (TyV (Obj x))) = Just (Right x)
-  -- getConst (Tm x) = Left <$> getConst x
-  getConst _ = Nothing
-
-  matchOne (Tm x) (Tm y) = map (bimap mkTm mkTm) <$> matchOne x y
-  matchOne (Tp x) (Tp y) = map (bimap mkTp mkTp) <$> matchOne x y
-  matchOne x y =
-    if toConstr x == toConstr y
-    then Just $ zip (children x) (children y)
-    else Nothing
---
---   -- matchOne (MV {}) _ = Nothing
---   -- matchOne _ (MV {}) = Nothing
---   -- matchOne (Lookup ctx x a) (Lookup ctx' x' a') =
---   --   Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
---   --
---   -- matchOne (HasType ctx t a) (HasType ctx' t' a') =
---   --   Just [(Ctx ctx, Ctx ctx'), (Tm t, Tm t'), (Tp a, Tp a')]
---   --
---   -- matchOne (Ctx Empty) (Ctx Empty) = Just []
---   -- matchOne (Ctx (Extend ctx x a)) (Ctx (Extend ctx' x' a')) =
---   --   Just [(Ctx ctx, Ctx ctx'), (x, x'), (Tp a, Tp a')]
---   -- matchOne (Ctx (CtxV x)) y = matchOne' x y
---   -- matchOne x (Ctx (CtxV y)) = matchOne' x y
---   --
---   -- matchOne (Tp Unit) (Tp Unit) = Just []
---   -- matchOne (Tp (Arr a b)) (Tp (Arr a' b')) =
---   --   Just [(Tp a, Tp a'), (Tp b, Tp b')]
---   -- matchOne (Tp (TyV x)) y = matchOne' x y
---   -- matchOne x (Tp (TyV y)) = matchOne' x y
---   --
---   -- matchOne (Tm (V x)) y = matchOne' x y
---   -- matchOne x (Tm (V y)) = matchOne' x y
---   -- matchOne (Tm (App x y)) (Tm (App x' y')) =
---   --   Just [(Tm x, Tm y), (Tm x', Tm y')]
---   -- matchOne (Tm (Lam x body)) (Tm (Lam x' body')) =
---   --   Just [(x, x'), (Tm body, Tm body')]
---   -- matchOne (Tm MkUnit) (Tm MkUnit) = Just []
---   -- matchOne _ _ = Nothing
---   --
---   -- getChildren (MV {}) = []
---   -- getChildren (Lookup ctx x a) = [Ctx ctx, x, Tp a]
---   --
---   -- getChildren (HasType ctx t a) = [Ctx ctx, Tm t, Tp a]
---   --
---   -- getChildren (Ctx Empty) = []
---   -- getChildren (Ctx (Extend ctx x a)) = [Ctx ctx, x] <> map (Tp . fmap Ctx) (getChildren a)
---   -- getChildren (Ctx (CtxV x)) = [x]
---   --
---   -- getChildren (Tp Unit) = []
---   -- getChildren (Tp (Arr a b)) =
---   --   [Tp a, Tp b]
---   -- getChildren (Tp (TyV x)) = [x]
---   --
---   -- getChildren (Tm (V x)) = [x]
---   -- getChildren (Tm (App x y)) =
---   --   [Tm x, Tm y]
---   -- getChildren (Tm (Lam x body)) =
---   --   [x, Tm body]
---   -- getChildren (Tm MkUnit) = []
---
--- -- matchOne' x@(MV {}) y = Just [(x, y)]
--- -- matchOne' x y@(MV {}) = Just [(x, y)]
--- -- matchOne' x y = matchOne x y
-
--- class MetaC a where toMeta :: a -> Meta_ String
--- class TypeC a where toType :: a -> Type (Meta_ String)
--- class TermC a where toTerm :: a -> Term (Meta_ String)
--- -- class CtxC a where toCtx :: a -> Ctx (Meta String)
---
--- instance MetaC String where toMeta = MV
--- instance MetaC (Meta_ String) where toMeta = id
---
--- instance TypeC String where toType = TyV . MV
--- instance TypeC (Type (Meta_ String)) where toType = id
---
--- instance TermC String where toTerm = V . MV
--- instance TermC (Term (Meta_ String)) where toTerm = id
-
---
--- instance CtxC String where toCtx = CtxV . MV
--- instance CtxC (Ctx (Meta String)) where toCtx = id
-
-class MetaC t x b a | a -> b where
-  getMeta :: a -> Meta t x b
-
-instance MetaC t x b (Meta t x b) where getMeta = id
-instance MetaC t x String String where getMeta = mv
-
-getMeta' :: forall t x b a. MetaC t x b a => a -> Meta_ x b
+getMeta' :: forall t a. MetaC t a => a -> Meta_
 getMeta' = unMeta . getMeta @t
 
-mv :: forall t b a. a -> Meta t b a
-mv = coerce (MV :: a -> Meta_ b a)
+mv :: String -> Meta t
+mv = Meta . MV . string2Name
 
-empty :: forall b a. Meta MCtx b a
-empty = coerce (Empty :: Meta_ b a)
+empty :: Meta MCtx
+empty = coerce Empty
 
-extend :: forall b a.
-  Meta MCtx b a -> Meta MName b a -> Meta MTp b a -> Meta MCtx b a
+extend :: Meta MCtx -> Meta MName -> Meta MTp -> Meta MCtx
 extend (Meta ctx) (Meta x) (Meta a) = Meta $ Extend ctx x a
 
-lookup :: forall b a.
-  Meta MCtx b a -> Meta MName b a -> Meta MTp b a -> Meta MJudgment b a
+lookup :: Meta MCtx -> Meta MName -> Meta MTp -> Meta MJudgment
 lookup (Meta ctx) (Meta x) (Meta a) = Meta $ Lookup ctx x a
 
-hasType :: forall b a.
-  Meta MCtx b a -> Meta MTm b a -> Meta MTp b a -> Meta MJudgment b a
+hasType :: Meta MCtx -> Meta MTm -> Meta MTp -> Meta MJudgment
 hasType (Meta ctx) (Meta x) (Meta a) = Meta $ HasType ctx x a
 
-tm :: forall b a. Term b -> Meta MTm b a
-tm = Meta . mkTm . fmap Obj --coerce . Tm . fmap MV
+tm :: Term -> Meta MTm
+tm = Meta . Tm
 
-tp :: forall b a. Type b -> Meta MTp b a
-tp = Meta . mkTp . fmap Obj --coerce . Tp . fmap MV
+tp :: Type -> Meta MTp
+tp = Meta . Tp
+-- tm = Meta . mkTm . fmap Obj --coerce . Tm . fmap MV
 
-tm' :: forall b a. Term (Var b a) -> Meta MTm b a
-tm' = Meta . mkTm . fmap (fmap MV)
+--
+-- tp :: forall b a. Type b -> Meta MTp b a
+-- tp = Meta . mkTp . fmap Obj --coerce . Tp . fmap MV
+--
+-- tm' :: forall b a. Term (Var b a) -> Meta MTm b a
+-- tm' = Meta . mkTm . fmap (fmap MV)
+--
+-- tp' :: forall b a. Type (Var b a) -> Meta MTp b a
+-- tp' = Meta . mkTp . fmap (fmap MV)
+--
+-- tm'' :: forall b a. Term a -> Meta MTm b a
+-- tm'' = Meta . mkTm . fmap (M . MV)
+--
+-- tp'' :: forall b a. Type a -> Meta MTp b a
+-- tp'' = Meta . mkTp . fmap (M . MV)
 
-tp' :: forall b a. Type (Var b a) -> Meta MTp b a
-tp' = Meta . mkTp . fmap (fmap MV)
+instance IsString Term where fromString = VT . string2Name
+instance IsString Type where fromString = TyV . string2Name
+instance IsString (Meta t) where fromString = mv
 
-tm'' :: forall b a. Term a -> Meta MTm b a
-tm'' = Meta . mkTm . fmap (M . MV)
+-- retagSubst :: Substitution (Meta t) b -> Substitution (Meta t') b
+-- retagSubst = coerce
 
-tp'' :: forall b a. Type a -> Meta MTp b a
-tp'' = Meta . mkTp . fmap (M . MV)
 
-instance IsString (Term String) where fromString = VT
-instance IsString (Type String) where fromString = TyV
-instance IsString (Meta t a String) where fromString = mv
 
-retagSubst :: Subst (Meta t a) b -> Subst (Meta t' a) b
-retagSubst = coerce
-
-tcRules :: [Rule (Meta MJudgment String) (Name L.V)]
-tcRules = map (toDebruijnRule . fmap L.V)
+tcRules :: [Rule (Meta MJudgment)]
+tcRules = --map (toDebruijnRule . fmap L.V)
   [fact $ lookup (extend "ctx" "x" "a") "x" "a"
   ,lookup (extend "ctx" "x" "a") "y" "b"
     :-
@@ -483,15 +333,15 @@ tcRules = map (toDebruijnRule . fmap L.V)
 
 
   ,fact $ hasType -- T-Unit
-            "ctx" (tm'' MkUnit) (tp'' Unit)
+            "ctx" (tm MkUnit) (tp Unit)
 
-  ,hasType "ctx" (tm'' (App "x" "y")) "b" -- T-App
+  ,hasType "ctx" (tm (App "x" "y")) "b" -- T-App
     :-
       [hasType "ctx" "y" "a"
-      ,hasType "ctx" "x" (tp'' (Arr "a" "b"))
+      ,hasType "ctx" "x" (tp (Arr "a" "b"))
       ]
 
-  ,hasType "ctx" (tm'' (Lam "x" "body")) (tp'' (Arr "a" "b")) -- T-Lam
+  ,hasType "ctx" (tm (lam "x" "body")) (tp (Arr "a" "b")) -- T-Lam
     :-
       [hasType
         (extend "ctx" "x" "a")
@@ -499,36 +349,33 @@ tcRules = map (toDebruijnRule . fmap L.V)
         "b"
       ]
 
-  ,fact $ hasType "ctx" (tm'' (MkBool False)) (tp'' Bool)
-  ,fact $ hasType "ctx" (tm'' (MkBool True)) (tp'' Bool)
+  ,fact $ hasType "ctx" (tm (MkBool False)) (tp Bool)
+  ,fact $ hasType "ctx" (tm (MkBool True)) (tp Bool)
   ]
 
--- TODO: Look into what generates the goal that leads to this unification.
--- The example this is from should not have an App there, I think.
---    *** unified Extend(Empty, ??x!18, Unit) |- ??body!20 : ??b!21 and ??ctx!29 |- (??x!30) ??y!27 : ??b!32 to get [...]
 
-inferType :: Term String -> Maybe (Type String)
-inferType t = do
-  let qr = query tcRules $ hasType empty (tm t) (mv (L.V "__a"))
-
-  case queryDisplaySubsts qr of
-    [] -> Nothing
-    (subst:_) ->
-      case applySubst subst $ mv (L.V "__a") of
-        Meta (Tp a) -> join <$> trav ((>>= traverse go') . go) a
-        Meta (MV _) -> Nothing
-        x -> error $ "inferType: " ++ show x
-  where
-    go (Obj x) = Just undefined -- $ TyV undefined --(Obj x)
-    go (M (Tp x)) = Just x
-    go (M _) = Nothing
-
-    go' (Obj x) = Just x
-    go' _ = Nothing
-
-    trav f r = sequenceA <$> traverse f r
-    -- go (MV (Right x)) = Just x
-    -- go _ = Nothing
+-- inferType :: Term String -> Maybe (Type String)
+-- inferType t = do
+--   let qr = query tcRules $ hasType empty (tm t) (mv (L.V "__a"))
+--
+--   case queryDisplaySubsts qr of
+--     [] -> Nothing
+--     (subst:_) ->
+--       case applySubst subst $ mv (L.V "__a") of
+--         Meta (Tp a) -> join <$> trav ((>>= traverse go') . go) a
+--         Meta (MV _) -> Nothing
+--         x -> error $ "inferType: " ++ show x
+--   where
+--     go (Obj x) = Just undefined -- $ TyV undefined --(Obj x)
+--     go (M (Tp x)) = Just x
+--     go (M _) = Nothing
+--
+--     go' (Obj x) = Just x
+--     go' _ = Nothing
+--
+--     trav f r = sequenceA <$> traverse f r
+--     -- go (MV (Right x)) = Just x
+--     -- go _ = Nothing
 
 test1 =
   query tcRules
@@ -536,33 +383,33 @@ test1 =
 
 test2 =
   query tcRules
-    $ hasType empty (tm (Lam "x" MkUnit)) (mv (L.V "a"))
+    $ hasType empty (tm (lam "x" MkUnit)) (mv "a")
 
-test3 = inferType (App (Lam "x" "x") MkUnit)
-test4 = inferType (App (Lam "x" MkUnit) MkUnit)
+-- test3 = inferType (App (lam "x" "x") MkUnit)
+-- test4 = inferType (App (lam "x" MkUnit) MkUnit)
 
-test5 = query tcRules $ hasType empty (tm (App (Lam "x" "x") MkUnit)) (mv (L.V "a"))
+test5 = query tcRules $ hasType empty (tm (App (lam "x" "x") MkUnit)) (mv "a")
 
 test6 = query tcRules
   $ hasType empty
-      (tm (App (Lam "f" (MkBool False)) (Lam "x" (MkBool True))))
-      (mv (L.V "a"))
+      (tm (App (lam "f" (MkBool False)) (lam "x" (MkBool True))))
+      (mv "a")
 
 test7 = query tcRules
   $ hasType empty
-      (tm (App (Lam "f" (App "f" (MkBool False))) (Lam "x" "x")))
-      (mv (L.V "a"))
+      (tm (App (lam "f" (App "f" (MkBool False))) (lam "x" "x")))
+      (mv "a")
 
 test8 = query tcRules
   $ hasType empty
-      (tm (Lam "f" (App "f" (MkBool False))))
+      (tm (lam "f" (App "f" (MkBool False))))
       (tp (Arr (Arr Bool Bool) Bool))
 
-
-data PprShow a = PprShow a
-
-instance Ppr a => Ppr (PprShow a) where pprDoc (PprShow x) = pprDoc x
-instance Ppr a => Show (PprShow a) where show = ppr
+--
+-- data PprShow a = PprShow a
+--
+-- instance Ppr a => Ppr (PprShow a) where pprDoc (PprShow x) = pprDoc x
+-- instance Ppr a => Show (PprShow a) where show = ppr
 
 
 
@@ -624,5 +471,4 @@ instance Ppr a => Show (PprShow a) where show = ppr
 -- test2 =
 --   query tcRules
 --     $ HasType Empty (Lam (MV (L.V "x")) MkUnit) (TyV (MV (L.V "a")))
-
 
