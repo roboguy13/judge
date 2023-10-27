@@ -36,9 +36,6 @@ import Debug.Trace
 
 import Unbound.Generics.LocallyNameless
 
-class Normalize t where
-  normalize :: t -> t
-
 data Rule t = t :- [t]
   deriving (Show, Foldable, Functor, Generic)
 
@@ -92,7 +89,7 @@ updateQueryResult qr = qr { queryResults = map go $ queryResults qr }
 -- original query:
 queryResultSubsts :: forall t. (Show t, Unify t) =>
   QueryResult t -> [Substitution t]
-queryResultSubsts qr = error "TODO: queryResultSubsts: implement"
+queryResultSubsts qr = error "queryResultSubsts: TODO: implement"
     -- filter ( $ map snd $ queryResults
   --   let results = snd <$> queryResultSubsts qr
   --       initialResultSubst = map mkTheSubst results
@@ -107,7 +104,7 @@ queryResultSubsts qr = error "TODO: queryResultSubsts: implement"
   --       go :: a -> (Either (Name a) a, f (Either (Name a) a))
   --       go x = (Right x, applySubstRec subst (mkVar (Right x)))
 --
-type QueryC t = (Show t, Ppr t, Plated t, Unify t, Normalize t)
+type QueryC t = (Ppr [t], Show t, Ppr t, Plated t, Unify t, Normalize t)
 
 mkQueryResult :: QueryC t =>
   (t -> [(Derivation t, Substitution t)]) -> (t -> QueryResult t)
@@ -137,13 +134,13 @@ querySubst subst rules goal0 = do
 
   rule <- freshenRule rule0
 
-  let goal = applySubstRec subst goal0
+  let goal = applySubstRec subst $ normalize goal0
 
   newSubst <-
-    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
-  -- () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst)
+  () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst)
 
   case map (applySubstRec newSubst) (ruleBody rule) of
     [] -> pure (DerivationStep goal [], newSubst)

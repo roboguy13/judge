@@ -120,4 +120,7 @@ test-suite judgment-test
         tasty,
         tasty-hunit,
         nat,
+        dependent-map,
+        dependent-sum,
+        some,
 
