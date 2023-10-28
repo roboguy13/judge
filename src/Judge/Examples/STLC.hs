@@ -78,7 +78,6 @@ instance Plated (Type a) where
     Bool -> pure Bool
     Unit -> pure Unit
     Arr x y -> Arr <$> f x <*> f y
-    TypeM x -> pure $ TypeM x
 
 instance (Typeable a, Alpha a) => Plated (Term a) where
   plate f = \case
@@ -90,10 +89,9 @@ instance (Typeable a, Alpha a) => Plated (Term a) where
       Lam <$> (bind vs <$> f body)
     MkUnit -> pure MkUnit
     MkBool b -> pure $ MkBool b
-    TermM x -> pure $ TermM x
 
 data Meta_ where
-  -- MV :: Name Meta_ -> Meta_
+  MV :: Name Meta_ -> Meta_
   Lookup :: Meta_ -> Meta_ -> Meta_ -> Meta_
   HasType :: Meta_ -> Meta_ -> Meta_ -> Meta_
 
@@ -111,12 +109,6 @@ instance Subst Meta_ (Type Meta_) where
   isCoerceVar (TyV x) = Just $ SubstCoerce (coerce x) go
     where
       go (Tp t) = Just t
-      go (MV x) = Just $ TyV (coerce x)
-      go _ = Nothing
-  isCoerceVar (TypeM (MV x)) = Just $ SubstCoerce (coerce x) go
-    where
-      go (Tp t) = Just t
-      go (MV x) = Just $ TyV (coerce x)
       go _ = Nothing
   isCoerceVar _ = Nothing
 
@@ -124,18 +116,11 @@ instance Subst Meta_ (Term Meta_) where
   isCoerceVar (VT x) = Just $ SubstCoerce (coerce x) go
     where
       go (Tm t) = Just t
-      go (MV x) = Just $ VT (coerce x)
-      go _ = Nothing
-  isCoerceVar (TermM (MV x)) = Just $ SubstCoerce (coerce x) go
-    where
-      go (Tm t) = Just t
-      go (MV x) = Just $ VT (coerce x)
       go _ = Nothing
   isCoerceVar _ = Nothing
 
 instance Plated Meta_ where
   plate f = \case
-    MV x -> pure $ MV x
     Lookup x y z -> Lookup <$> f x <*> f y <*> f z
     HasType x y z -> HasType <$> f x <*> f y <*> f z
     Empty -> pure Empty
@@ -143,50 +128,9 @@ instance Plated Meta_ where
     Tp ty -> pure $ Tp ty
     Tm x -> pure $ Tm x
 
+mkTp = Tp
+mkTm = Tm
 
-mkTp :: Type Meta_ -> Meta_
-mkTp (TypeM x) = x
-mkTp x = Tp x
-
-mkTm :: Term Meta_ -> Meta_
-mkTm (TermM x) = x
-mkTm x = Tm x
-
-normalizeType :: Type Meta_ -> Type Meta_
-normalizeType (TypeM x) = TypeM $ normalizeMeta_ x
-normalizeType (TyV x) = TyV x
-normalizeType Bool = Bool
-normalizeType Unit = Unit
-normalizeType (Arr x y) = Arr (normalizeType x) (normalizeType y)
-
--- | Note this is "normalizing" w.r.t. metavariables. Unrelated to
--- evaluation
-normalizeTerm :: Term Meta_ -> Term Meta_
-normalizeTerm (VT x) = VT x
-normalizeTerm (TermM x) = TermM $ normalizeMeta_ x
-normalizeTerm (App x y) = App (normalizeTerm x) (normalizeTerm y)
-normalizeTerm (Lam bnd) =
-  let (v, body) = unsafeUnbind bnd
-  in
-  Lam $ bind v $ normalizeTerm body
-normalizeTerm MkUnit = MkUnit
-normalizeTerm (MkBool b) = MkBool b
-
-normalizeMeta_ :: Meta_ -> Meta_
-normalizeMeta_ (Tp x) = mkTp (normalizeType x)
-normalizeMeta_ (Tm x) = mkTm (normalizeTerm x)
-normalizeMeta_ (MV x) = MV x
-normalizeMeta_ (Lookup x y z) = Lookup (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
-normalizeMeta_ (HasType x y z) = HasType (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
-normalizeMeta_ (Extend x y z) = Extend (normalizeMeta_ x) (normalizeMeta_ y) (normalizeMeta_ z)
-normalizeMeta_ Empty = Empty
-
-normalizeMeta :: Meta t -> Meta t
-normalizeMeta (Meta x) = Meta $ normalizeMeta_ x
-
--- -- instance Normalize (Meta t b) where normalize = normalizeMeta
--- -- -- (Meta {unMeta = HasType (Extend Empty (Tm (V (Obj "x"))) (Tp Unit)) (Tm (V (Obj "x"))) (MV (Left (Name (V "a") 25)))})
---
 data MSort = MJudgment | MCtx | MTp | MTm | MName
   deriving (Typeable)
 
@@ -201,17 +145,16 @@ instance Alpha Meta_
 
 instance Alpha (Meta t)
 instance Subst (Meta t) Meta_ where
-  isCoerceVar (MV x) = Just (SubstCoerce (coerce x) (Just . unMeta))
-  isCoerceVar _ = Nothing
+  -- isCoerceVar (MV x) = Just (SubstCoerce (coerce x) (Just . unMeta))
+  -- isCoerceVar _ = Nothing
 instance Subst (Meta t) (Meta t) where
-  isvar (Meta (MV x)) = Just (SubstName (coerce x)) -- TODO: Is this right?
-  isvar _ = Nothing
+  -- isvar (Meta (MV x)) = Just (SubstName (coerce x)) -- TODO: Is this right?
+  -- isvar _ = Nothing
 
 instance Subst (Meta t) (Type Meta_) where
   isCoerceVar (TyV x) = Just $ SubstCoerce (coerce x) go
     where
       go (Meta (Tp t)) = Just t
-      go (Meta (MV x)) = Just $ TyV (coerce x)
       go _ = Nothing
   isCoerceVar _ = Nothing
 
@@ -219,7 +162,6 @@ instance Subst (Meta t) (Term Meta_) where
   isCoerceVar (VT x) = Just $ SubstCoerce (coerce x) go
     where
       go (Meta (Tm t)) = Just t
-      go (Meta (MV x)) = Just $ VT (coerce x)
       go _ = Nothing
   isCoerceVar _ = Nothing
 
@@ -246,26 +188,26 @@ instance forall k (t :: k). (Typeable k, Typeable t) => Unify (Meta t) where
   mkVar = Meta . MV . coerce
 
   getChildren (Meta x) = coerce <$> getChildren x
-  matchOne (Meta x) (Meta y) = coerce <$> matchOne x y
+  matchOne (Meta x) (Meta y) = _ <$> matchOne x y
 
 instance Unify Meta_ where
   mkVar = MV
 
-  getChildren (Tm x) = map normalize . fmap Tm <$> getChildren x
-  getChildren (Tp x) = map normalize . fmap Tp <$> getChildren x
-  getChildren x = pure $ map normalize $ children x
+  getChildren (Tm x) = fmap Tm <$> getChildren x
+  getChildren (Tp x) = fmap Tp <$> getChildren x
+  getChildren x = pure $ children x
 
   matchOne (Tm x) (Tm y) = fmap (map (bimap Tm Tm)) <$> matchOne x y
   matchOne (Tp x) (Tp y) = fmap (map (bimap Tp Tp)) <$> matchOne x y
   matchOne x y =
     if constrEq x y
-    then Just <$> liftA2 zip (getChildren x) (getChildren y)
+    then Just <$> liftA2 zipWith _ (getChildren x) (getChildren y)
     else pure Nothing
 
-instance Normalize Meta_ where normalize = normalizeMeta_
-instance Normalize (Meta t) where normalize = normalizeMeta
-instance Normalize (Term Meta_) where normalize = normalizeTerm
-instance Normalize (Type Meta_) where normalize = normalizeType
+instance Normalize Meta_ where normalize = id
+instance Normalize (Meta t) where normalize = id
+instance Normalize (Term Meta_) where normalize = id
+instance Normalize (Type Meta_) where normalize = id
 
 instance Ppr (Meta t) where pprDoc (Meta x) = pprDoc x
 
@@ -290,7 +232,7 @@ instance Ppr a => Ppr (Type a) where
   pprDoc Bool = text "Bool"
   pprDoc (Arr x y) =
     text "Arr" <.> text "(" <.> pprDoc x <.> text "," <+> pprDoc y <.> text ")"
-  pprDoc (TypeM x) = text "?" <.> pprDoc x
+  -- pprDoc (TypeM x) = text "?" <.> pprDoc x
 
 -- instance Ppr a => Ppr (Ctx a) where
 --   pprDoc (CtxV x) = pprDoc x
@@ -307,7 +249,7 @@ instance (Ppr a, Typeable a, Alpha a) => Ppr (Term a) where
     text "\\" <.> pprDoc x <.> text "." <+> pprDoc body
   pprDoc MkUnit = text "MkUnit"
   pprDoc (MkBool b) = text (show b)
-  pprDoc (TermM x) = text "?" <.> pprDoc x
+  -- pprDoc (TermM x) = text "?" <.> pprDoc x
 
 class MetaC t a where
   getMeta :: a -> Meta t
@@ -340,18 +282,20 @@ tp :: Type Meta_ -> Meta MTp
 tp = Meta . Tp
 -- tm = Meta . mkTm . fmap Obj --coerce . Tm . fmap MV
 
--- | Turn all object variables into metavariables
-tm' :: Term Meta_ -> Meta MTm
-tm' = Meta . Tm . rewrite go
-  where
-    go (VT x) = Just $ TermM $ MV (coerce x)
-    go _ = Nothing
-
-tp' :: Type Meta_ -> Meta MTp
-tp' = Meta . Tp . rewrite go
-  where
-    go (TyV x) = Just $ TypeM $ MV (coerce x)
-    go _ = Nothing
+tm' = Meta . Tm
+tp' = Meta . Tp
+-- -- | Turn all object variables into metavariables
+-- tm' :: Term Meta_ -> Meta MTm
+-- tm' = Meta . Tm . rewrite go
+--   where
+--     go (VT x) = Just $ TermM $ MV (coerce x)
+--     go _ = Nothing
+--
+-- tp' :: Type Meta_ -> Meta MTp
+-- tp' = Meta . Tp . rewrite go
+--   where
+--     go (TyV x) = Just $ TypeM $ MV (coerce x)
+--     go _ = Nothing
 
 --
 -- tp :: forall b a. Type b -> Meta MTp b a

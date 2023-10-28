@@ -74,12 +74,12 @@ data QueryResult t =
   , queryResults :: [(Derivation t, Substitution t)]
   }
 
-substDerivation :: (Show t, Unify t) =>
+substDerivation :: (Show t, Unify t, Ppr t) =>
   Substitution t -> Derivation t -> Derivation t
 substDerivation subst deriv = fmap (applySubstRec subst) deriv
 
 -- | Apply the corresponding substitution to each derivation tree
-updateQueryResult :: (Show t, Unify t, Normalize t) =>
+updateQueryResult :: (Show t, Unify t, Normalize t, Ppr t) =>
   QueryResult t -> QueryResult t
 updateQueryResult qr = qr { queryResults = map go $ queryResults qr }
   where
