@@ -184,7 +184,7 @@ applySubstRec subst x =
     then applySubstRec subst y
     else y
 
-extendSubst :: (Typeable a, Ppr a, Subst a t, Plated a, Unify a, Subst a a, Ppr t, Plated t) => Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
+extendSubst :: (Unify t, Subst t a, Typeable a, Ppr a, Subst a t, Plated a, Unify a, Subst a a, Ppr t, Plated t) => Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
 extendSubst subst v x =
   case substLookup' subst v of
     Nothing ->
@@ -201,10 +201,10 @@ combineSubsts = mconcat
 unify :: forall t. (Ppr t, Normalize t, UnifyC t, Plated t) => t -> t -> Maybe (Substitution t)
 unify = unifySubst mempty
 
-unifySubst :: forall t. (Ppr t, Normalize t, UnifyC t, Plated t) => Substitution t -> t -> t -> Maybe (Substitution t)
+unifySubst :: forall t. (Unify t, Ppr t, Normalize t, UnifyC t, Plated t) => Substitution t -> t -> t -> Maybe (Substitution t)
 unifySubst subst x y = runFreshMT $ unifySubst' subst (normalize x) (normalize y)
 
-unifySubst' :: forall t a. (Unify a, Plated a, Ppr t, Subst a t, Plated t, Ppr a) => Substitution t -> a -> a -> FreshMT Maybe (Substitution t)
+unifySubst' :: forall t a. (Unify t, Unify a, Plated a, Ppr t, Subst a t, Subst t a, Plated t, Ppr a) => Substitution t -> a -> a -> FreshMT Maybe (Substitution t)
 unifySubst' subst x y
   | Just xV <- getVar @a x = unifyVar subst xV y
 
@@ -226,10 +226,10 @@ instance Plated c => Plated (SubstTrans a b c) where
   plate f (SubstTrans x) =
     SubstTrans <$> plate (fmap unSubstTrans . f . SubstTrans) x
 
-instance forall (a :: *) (b :: *) c. (Subst (SubstTrans a b c) (SubstTrans a b c), Typeable a, Typeable b, Unify b, Unify c) => Unify (SubstTrans a b c) where
-  mkVar = undefined
-  getChildren = undefined
-  matchOne = undefined
+-- instance forall (a :: *) (b :: *) c. (Subst (SubstTrans a b c) (SubstTrans a b c), Typeable a, Typeable b, Unify b, Unify c) => Unify (SubstTrans a b c) where
+--   mkVar = undefined
+--   getChildren = undefined
+--   matchOne = undefined
 
 convert' :: forall a b. (Subst a b, Unify b) => Name a -> a -> b
 convert' v x =
@@ -277,7 +277,7 @@ instance forall a b c. (Unify b, Unify a, Unify c, Subst a b, Subst b c) => Subs
 
   substBvs ctx bs (SubstTrans x) = SubstTrans $ substBvs ctx (map (convert @_ @b) bs) x
 
--- instance Subst c c => Subst (SubstTrans b c) (SubstTrans b c) where
+-- instance Subst c c => Subst (SubstTrans a b c) (SubstTrans a b c) where
 --   isvar x = undefined
 --
 --   isCoerceVar x = do
@@ -291,22 +291,25 @@ instance forall a b c. (Unify b, Unify a, Unify c, Subst a b, Subst b c) => Subs
 --
 --   substBvs ctx bs x = undefined
 
-unifyList :: forall t b. (Unify b, Ppr t, Subst b t, Plated t, Typeable b, Unify t
+unifyList :: forall t b. (Plated b, Unify b, Ppr t, Ppr b, Subst b t, Subst t b, Plated t, Typeable b, Unify t
                          -- , forall x. Subst x t => Subst (SubstTrans b t x) t
                          -- , forall x. Subst (SubstTrans b t x) (SubstTrans b t x)
                          ) =>
   Substitution t -> [UnifyPair b] -> FreshMT Maybe (Substitution t)
 unifyList subst [] = lift $ Just subst
 unifyList subst (UnifyPair (x :: a) y : rest) = do
-    undefined
   -- let p :: Dict (Subst a (SubstTrans a b t))
   --     p = Dict
   -- undefined
 
-  -- subst' <- unifySubst' subst (SubstTrans x) (SubstTrans x :: SubstTrans t b a)
-  -- unifyList subst' rest
+  -- let q :: Dict (Subst (SubstTrans t b a) t)
+  --     q = Dict
+  -- undefined
 
-unifyVar :: forall t a. (Ppr t, Unify a, Plated a, Subst a t, Plated t, Ppr a) => Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
+  subst' <- unifySubst' subst (convert @a @b x) (convert @a @b y) --(SubstTrans x) (SubstTrans y :: SubstTrans t b a)
+  unifyList subst' rest
+
+unifyVar :: forall t a. (Ppr t, Unify t, Unify a, Plated a, Subst t a, Subst a t, Plated t, Ppr a) => Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
 unifyVar subst xV y =
     occursCheck xV y >>= \case
       True -> lift Nothing
