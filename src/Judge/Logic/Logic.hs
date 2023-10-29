@@ -3,9 +3,14 @@
 {-# LANGUAGE FunctionalDependencies #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Judge.Logic.Logic
   where
+
+import Prelude hiding (id, (.))
+
+import Control.Category
 
 import Judge.Logic.Unify
 import Judge.Logic.Derivation
@@ -30,28 +35,72 @@ import Control.Lens hiding ((<.>))
 
 import Control.Monad.State
 
-import GHC.Generics
+import GHC.Generics hiding (to)
 
 import Debug.Trace
 
 import Unbound.Generics.LocallyNameless
+import Data.Proxy
+import Data.Coerce
 
 data Rule t = t :- [t]
   deriving (Show, Foldable, Functor, Generic)
 
 newtype ClosedRule t = ClosedRule (Bind [Name t] (Rule t))
 
+data SomeInjection a = forall b. (Alpha b, Typeable b) => SomeInjection (Injection b a)
+
+class FV a where
+  getInjections :: proxy a -> [SomeInjection a]
+  -- getFVs :: a -> [AnyName]
+
+-- freshenFVs :: forall t m. (Unify t, Fresh m, Alpha t) => FV t => t -> m t
+-- freshenFVs = go (SomeInjection id : getInjections (Proxy @t))
+--   where
+--     go [] t = pure t
+--     go (SomeInjection (inj :: Injection b t) : rest) t = do
+--       let fvs = toListOf fv t :: [Name b]
+--       traceM $ "fvs = " ++ show fvs
+--       t' <- freshenVars (map coerce fvs) t -- TODO: Do I actually need to use the injections here?
+--       go rest t'
+
+freshenVars :: (Fresh m, Unify a) => [Name a] -> Rule a -> m (Rule a)
+freshenVars vs x = do
+  vs' <- traverse fresh vs
+  () <- traceM $ "old vars " ++ show vs ++ "; fresh vars = " ++ show vs'
+  pure $ substsRule (zip vs (map mkVar vs')) x
+
+ruleFvs :: (Typeable t, Alpha t) => Rule t -> [Name t]
+ruleFvs (hd :- body) = (toListOf fv hd ++ toListOf fv body)
+
 mkClosedRule :: (Typeable t, Alpha t) => Rule t -> ClosedRule t
 mkClosedRule rule@(hd :- body) =
-  ClosedRule $ bind (toListOf fv hd ++ toListOf fv body) rule
+  ClosedRule $ bind (ruleFvs rule) rule
 
 toOpenRule :: (Typeable t, Alpha t, Fresh m) => ClosedRule t -> m (Rule t)
 toOpenRule (ClosedRule cRule) = do
   (_vs, rule) <- unbind cRule
   pure rule
 
-freshenRule :: (Typeable t, Alpha t, Fresh m) => Rule t -> m (Rule t)
-freshenRule = toOpenRule . mkClosedRule
+ruleTerms :: Rule a -> [a]
+ruleTerms (hd :- body) = hd : body
+
+freshenRule :: forall t m. (Unify t, Plated t, Fresh m, Alpha t, FV t) => Rule t -> m (Rule t)
+freshenRule = go (SomeInjection (id :: Injection t t) : getInjections (Proxy @t))
+  where
+    go [] t = pure t
+    go (SomeInjection (inj :: Injection b t) : rest) t = do
+      let fvs = toListOf (traversed . fv) (ruleTerms t) :: [Name b]
+      -- let fvs = toListOf fv (ruleTerms t) :: [Name b]
+      t' <- freshenVars (map coerce fvs) t -- TODO: Do I actually need to use the injections here?
+      traceM $ "fvs = " ++ show fvs ++ " to get " ++ show t'
+      go rest t'
+
+substsRule :: Subst a b => [(Name a, a)] -> Rule b -> Rule b
+substsRule xs (hd :- body) = substs xs hd :- substs xs body
+
+-- freshenRule :: (Typeable t, Alpha t, Fresh m) => Rule t -> m (Rule t)
+-- freshenRule = toOpenRule . mkClosedRule
 
 instance Alpha t => Alpha (Rule t)
 
@@ -105,7 +154,7 @@ queryResultSubsts qr = error "queryResultSubsts: TODO: implement"
   --       go :: a -> (Either (Name a) a, f (Either (Name a) a))
   --       go x = (Right x, applySubstRec subst (mkVar (Right x)))
 --
-type QueryC t = (Ppr [t], Show t, Ppr t, Plated t, Unify t, Normalize t)
+type QueryC t = (Ppr [t], Show t, Ppr t, Plated t, Unify t, Normalize t, FV t)
 
 mkQueryResult :: QueryC t =>
   (t -> [(Derivation t, Substitution t)]) -> (t -> QueryResult t)
@@ -126,7 +175,9 @@ query :: (QueryC t) =>
   [Rule t] -> t -> QueryResult t
 query rules =
   mkQueryResult $ \goal ->
-      runFreshMT (querySubst mempty rules goal)
+      runFreshMT $ do
+        freshenRule (goal :- []) -- So that we know we should freshen things w.r.t. to the free variables in the goal
+        querySubst mempty rules goal
 
 querySubst :: (QueryC t) =>
   Substitution t -> [Rule t] -> t -> FreshMT [] (Derivation t, Substitution t)
@@ -138,10 +189,11 @@ querySubst subst rules goal0 = do
   let goal = applySubstRec subst $ normalize goal0
 
   newSubst <-
-    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    trace ("rule fvs = " ++ show (ruleFvs rule0)) $
+    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
-  -- () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst)
+  () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst)
 
   case map (applySubstRec newSubst) (ruleBody rule) of
     [] -> pure (DerivationStep goal [], newSubst)

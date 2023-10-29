@@ -124,6 +124,13 @@ data Meta_ where
   Tm :: Term -> Meta_
   deriving (Show, Generic)
 
+instance FV (Meta t) where
+  getInjections _ =
+    [SomeInjection metaInj1
+    ,SomeInjection $ metaInj1 . tmInj_
+    ,SomeInjection $ metaInj1 . tyInj_
+    ]
+
 instance Subst Meta_ Meta_ where
   isvar (MV x) = Just $ SubstName x
   isvar _ = Nothing
@@ -144,6 +151,7 @@ instance Subst Meta_ Term where
 
 instance Plated Meta_ where
   plate f = \case
+    MV x -> pure $ MV x
     Lookup x y z -> Lookup <$> f x <*> f y <*> f z
     HasType x y z -> HasType <$> f x <*> f y <*> f z
     Empty -> pure Empty
@@ -168,11 +176,11 @@ instance Alpha Meta_
 
 instance Alpha (Meta t)
 instance Subst (Meta t) Meta_ where
-  -- isCoerceVar (MV x) = Just (SubstCoerce (coerce x) (Just . unMeta))
-  -- isCoerceVar _ = Nothing
+  isCoerceVar (MV x) = Just (SubstCoerce (coerce x) (Just . unMeta))
+  isCoerceVar _ = Nothing
 -- instance Subst (Meta t) (Meta t) where
-  -- isvar (Meta (MV x)) = Just (SubstName (coerce x)) -- TODO: Is this right?
-  -- isvar _ = Nothing
+--   isvar (Meta (MV x)) = Just (SubstName (coerce x)) -- TODO: Is this right?
+--   isvar _ = Nothing
 
 instance Subst (Meta t) Type where
   isCoerceVar (TyV x) = Just $ SubstCoerce (coerce x) go
@@ -227,7 +235,13 @@ instance forall k (t :: k). (Typeable k, Typeable t) => Unify (Meta t) where
   getChildren (Meta x) = coerce <$> getChildren x
   matchOne (Meta x) (Meta y) = fmap (map (\(UnifyPair inj a b) -> UnifyPair (metaInj1 . inj) a b)) <$> matchOne x y
 
-instance Subst a Meta_ => Subst a (Meta t)
+instance Subst a Meta_ => Subst a (Meta t) where
+  isCoerceVar (Meta v) = do
+    SubstCoerce x f <- isCoerceVar v :: Maybe (SubstCoerce Meta_ a)
+    pure $ SubstCoerce x (fmap Meta . f)
+  -- isvar (Meta v) = do
+  --   SubstName x <- isvar v :: Maybe (SubstName Meta_ a)
+  --   pure $ SubstName (_ x)
 
 instance Subst Term Meta_ where
   isCoerceVar (MV x) = Just $ SubstCoerce (coerce x) (Just . Tm)
@@ -469,22 +483,22 @@ test2 =
 -- -- -- test3 = inferType (App (lam "x" "x") MkUnit)
 -- -- -- test4 = inferType (App (lam "x" MkUnit) MkUnit)
 -- --
--- -- test5 = query tcRules $ hasType empty (tm (App (lam "x" "x") MkUnit)) (mv "a")
--- --
--- -- test6 = query tcRules
--- --   $ hasType empty
--- --       (tm (App (lam "f" (MkBool False)) (lam "x" (MkBool True))))
--- --       (mv "a")
--- --
--- -- test7 = query tcRules
--- --   $ hasType empty
--- --       (tm (App (lam "f" (App "f" (MkBool False))) (lam "x" "x")))
--- --       (mv "a")
--- --
--- -- test8 = query tcRules
--- --   $ hasType empty
--- --       (tm (lam "f" (App "f" (MkBool False))))
--- --       (tp (Arr (Arr Bool Bool) Bool))
+test5 = query tcRules $ hasType empty (tm (App (lam "x" "x") MkUnit)) (mv "a")
+
+test6 = query tcRules
+  $ hasType empty
+      (tm (App (lam "f" (MkBool False)) (lam "x" (MkBool True))))
+      (mv "a")
+
+test7 = query tcRules
+  $ hasType empty
+      (tm (App (lam "f" (App "f" (MkBool False))) (lam "x" "x")))
+      (mv "a")
+
+test8 = query tcRules
+  $ hasType empty
+      (tm (lam "f" (App "f" (MkBool False))))
+      (tp (Arr (Arr Bool Bool) Bool))
 -- --
 -- --
 -- --

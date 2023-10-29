@@ -96,11 +96,13 @@ class (Alpha t, Typeable t, Subst t t) => Unify t where
 
 type UnifyC t = (Subst t t, Ppr t, Unify t, Show t) --, Traversable f, Plated t, Data a, Monad f, Show a, Show (f a))
 
-getVar :: forall t. Subst t t => t -> Maybe (Name t)
+getVar :: forall t a. Subst a t => t -> Maybe (Name a)
 getVar x =
-  case isvar @t @t x of
+  case isvar @a @t x of
     Just (SubstName n) -> Just n
-    Nothing -> Nothing
+    _ -> case isCoerceVar @a @t x of
+      Just (SubstCoerce n _) -> Just n
+      Nothing -> Nothing
 
 data AName t a where
   AName :: (Typeable a, Ppr t, Ppr a) => Injection a t -> Name a -> AName t a
@@ -198,6 +200,8 @@ extendSubstInj :: (Unify t, Typeable a, Ppr a, Subst t t, Plated a, Unify a, Ppr
   Injection a t ->
   Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
 extendSubstInj inj subst v x =
+  -- | Just x' <- substLookupInj inj subst v, Just xV <- getVar x', xV == v = pure subst
+  -- | otherwise =
   case substLookupInj inj subst v of
     Nothing ->
       let oneSubst = singleSubst inj v x
@@ -205,7 +209,9 @@ extendSubstInj inj subst v x =
       in
       lift $ Just r
       -- trace ("extendSubst: " ++ ppr v ++ ", " ++ ppr x ++ " ---> " ++ show r) r
-    Just y -> unifySubstInj inj subst x y
+    Just y
+      | Just yV <- getVar y, yV == v -> pure subst
+      | otherwise -> unifySubstInj inj subst x y
 
 combineSubsts :: [Substitution t] -> Substitution t
 combineSubsts = mconcat
@@ -230,6 +236,9 @@ unifySubstInj inj subst x y
         Nothing -> lift Nothing
 
 data Injection a b = Injection (a -> b) (b -> Maybe a)
+
+injectionPrism :: Injection a b -> Prism' b a
+injectionPrism inj = prism' (inject inj) (project inj)
 
 inject :: Injection a b -> a -> b
 inject (Injection f _) = f
@@ -273,19 +282,21 @@ unifyListInj inj subst (UnifyPair injA (x :: a) y : rest) = do
 unifyVarInj :: forall t a. (Ppr t, Unify t, Unify a, Plated a, Subst t t, Plated t, Ppr a) =>
   Injection a t ->
   Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
-unifyVarInj inj subst xV y =
-    occursCheck xV y >>= \case
-      True -> lift Nothing
-      False ->
-        case getVar y of
-          Just yV -> case substLookupInj inj subst yV of
-                        Just yInst ->
-                          occursCheck xV yInst >>= \case
-                            True -> lift Nothing
-                            -- False -> unifySubst' @t subst (mkVar @t xV) yInst
-                            False -> unifySubstInj inj subst (mkVar xV) yInst
-                        Nothing -> extendSubstInj inj subst xV y
-          Nothing -> extendSubstInj inj subst xV y
+unifyVarInj inj subst xV y
+  | Just yV <- getVar y, yV == xV = pure subst
+  | otherwise =
+      occursCheck xV y >>= \case
+        True -> lift Nothing
+        False ->
+          case getVar y of
+            Just yV -> case substLookupInj inj subst yV of
+                          Just yInst ->
+                            occursCheck xV yInst >>= \case
+                              True -> lift Nothing
+                              -- False -> unifySubst' @t subst (mkVar @t xV) yInst
+                              False -> unifySubstInj inj subst (mkVar xV) yInst
+                          Nothing -> extendSubstInj inj subst xV y
+            Nothing -> extendSubstInj inj subst xV y
 
 occursCheck :: (Fresh m, UnifyC t, Alpha t, Plated t) => Name t -> t -> m Bool
 occursCheck v x
