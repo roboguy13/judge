@@ -282,21 +282,19 @@ unifyListInj inj subst (UnifyPair injA (x :: a) y : rest) = do
 unifyVarInj :: forall t a. (Ppr t, Unify t, Unify a, Plated a, Subst t t, Plated t, Ppr a) =>
   Injection a t ->
   Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
-unifyVarInj inj subst xV y
-  | Just yV <- getVar y, yV == xV = pure subst
-  | otherwise =
-      occursCheck xV y >>= \case
-        True -> lift Nothing
-        False ->
-          case getVar y of
-            Just yV -> case substLookupInj inj subst yV of
-                          Just yInst ->
-                            occursCheck xV yInst >>= \case
-                              True -> lift Nothing
-                              -- False -> unifySubst' @t subst (mkVar @t xV) yInst
-                              False -> unifySubstInj inj subst (mkVar xV) yInst
-                          Nothing -> extendSubstInj inj subst xV y
-            Nothing -> extendSubstInj inj subst xV y
+unifyVarInj inj subst xV y =
+  occursCheck xV y >>= \case
+    True -> lift Nothing
+    False ->
+      case getVar y of
+        Just yV -> case substLookupInj inj subst yV of
+                      Just yInst ->
+                        occursCheck xV yInst >>= \case
+                          True -> lift Nothing
+                          -- False -> unifySubst' @t subst (mkVar @t xV) yInst
+                          False -> unifySubstInj inj subst (mkVar xV) yInst
+                      Nothing -> extendSubstInj inj subst xV y
+        Nothing -> extendSubstInj inj subst xV y
 
 occursCheck :: (Fresh m, UnifyC t, Alpha t, Plated t) => Name t -> t -> m Bool
 occursCheck v x

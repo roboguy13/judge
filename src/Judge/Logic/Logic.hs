@@ -67,7 +67,7 @@ class FV a where
 freshenVars :: (Fresh m, Unify a) => [Name a] -> Rule a -> m (Rule a)
 freshenVars vs x = do
   vs' <- traverse fresh vs
-  () <- traceM $ "old vars " ++ show vs ++ "; fresh vars = " ++ show vs'
+  -- () <- traceM $ "old vars " ++ show vs ++ "; fresh vars = " ++ show vs'
   pure $ substsRule (zip vs (map mkVar vs')) x
 
 ruleFvs :: (Typeable t, Alpha t) => Rule t -> [Name t]
@@ -93,7 +93,7 @@ freshenRule = go (SomeInjection (id :: Injection t t) : getInjections (Proxy @t)
       let fvs = toListOf (traversed . fv) (ruleTerms t) :: [Name b]
       -- let fvs = toListOf fv (ruleTerms t) :: [Name b]
       t' <- freshenVars (map coerce fvs) t -- TODO: Do I actually need to use the injections here?
-      traceM $ "fvs = " ++ show fvs ++ " to get " ++ show t'
+      -- traceM $ "fvs = " ++ show fvs ++ " to get " ++ show t'
       go rest t'
 
 substsRule :: Subst a b => [(Name a, a)] -> Rule b -> Rule b
@@ -177,23 +177,26 @@ query rules =
   mkQueryResult $ \goal ->
       runFreshMT $ do
         freshenRule (goal :- []) -- So that we know we should freshen things w.r.t. to the free variables in the goal
-        querySubst mempty rules goal
+        rules' <- traverse freshenRule rules
+        querySubst mempty rules' goal
 
 querySubst :: (QueryC t) =>
   Substitution t -> [Rule t] -> t -> FreshMT [] (Derivation t, Substitution t)
 querySubst subst rules goal0 = do
-  rule0 <- lift rules
+  rule <- lift rules
 
-  rule <- freshenRule rule0
+  -- rule <- freshenRule rule0
 
   let goal = applySubstRec subst $ normalize goal0
 
   newSubst <-
-    trace ("rule fvs = " ++ show (ruleFvs rule0)) $
-    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    -- trace ("rule fvs = " ++ show (ruleFvs rule0)) $
+    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
-  () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst)
+  -- () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)
+  --                -- ++ " to get\n^====> " ++ ppr newSubst
+  --              )
 
   case map (applySubstRec newSubst) (ruleBody rule) of
     [] -> pure (DerivationStep goal [], newSubst)
