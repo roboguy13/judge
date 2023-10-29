@@ -103,12 +103,12 @@ getVar x =
     Nothing -> Nothing
 
 data AName t a where
-  AName :: (Typeable a, Ppr t, Ppr a) => Name a -> AName t a
+  AName :: (Typeable a, Ppr t, Ppr a) => Injection a t -> Name a -> AName t a
 
-instance Ppr (AName t a) where pprDoc (AName x) = pprDoc x
+instance Ppr (AName t a) where pprDoc (AName _ x) = pprDoc x
 
-retagAName :: (Ppr t', Subst a t') => AName t a -> AName t' a
-retagAName (AName x) = AName $ coerce x
+-- retagAName :: (Ppr t', Subst a t') => AName t a -> AName t' a
+-- retagAName (AName inj x) = AName _ $ coerce x
 
 -- instance GShow (AName t)
 
@@ -133,13 +133,15 @@ instance (Alpha t, Typeable t, Ppr t) => Ppr (Substitution t) where
       go :: DSum (AName t) Identity -> Doc
       go (x@AName{} :=> y) = pprDoc x <+> text "=" <+> pprDoc y
 
-singleSubst :: (Typeable a, Subst a a, Ppr t, Ppr a) => Name a -> a -> Substitution t
-singleSubst xV y
+singleSubst :: (Typeable a, Subst a a, Ppr t, Ppr a) =>
+  Injection a t ->
+  Name a -> a -> Substitution t
+singleSubst inj xV y
   | Just yV <- getVar y, xV == yV = Substitution mempty
-  | otherwise                     = Substitution $ DM.singleton (AName xV) (Identity y)
+  | otherwise                     = Substitution $ DM.singleton (AName inj xV) (Identity y)
 
 instance GEq (AName t) where
-  geq (AName (x :: Name a)) (AName (y :: Name b)) =
+  geq (AName injX (x :: Name a)) (AName injY (y :: Name b)) =
     case testEquality (typeRep @a) (typeRep @b) of
       Just Refl ->
         if aeq x y
@@ -148,38 +150,49 @@ instance GEq (AName t) where
       Nothing -> Nothing
 
 instance GCompare (AName t) where
-  gcompare (AName (x :: Name a)) (AName (y :: Name b)) =
+  gcompare (AName injX (x :: Name a)) (AName injY (y :: Name b)) =
     case testEquality (typeRep @a) (typeRep @b) of
       Just Refl ->
         case compare x y of
           LT -> GLT
           EQ -> GEQ
           GT -> GGT
+      Nothing -> GGT -- TODO: Does this work?
 
 substLookupInj :: forall t a. (Typeable t, Subst t t, Ppr t, Ppr a) =>
   Injection a t ->
   Substitution t -> Name a -> Maybe a
-substLookupInj inj subst v = do
-  z <- substLookup subst (coerce v)
+substLookupInj inj (Substitution xs) v = do
+  z <- runIdentity <$> DM.lookup (AName id (coerce v)) xs--substLookup subst (coerce v)
   project inj z
 
-substLookup' :: forall t a. (Typeable a, Subst a t, Ppr t, Ppr a) => Substitution t -> Name a -> Maybe a
-substLookup' (Substitution xs) x = runIdentity <$> DM.lookup (AName x :: AName t a) xs
-
 substLookup :: (Typeable t, Subst t t, Ppr t) => Substitution t -> Name t -> Maybe t
-substLookup = substLookup'
+substLookup = substLookupInj id
 
--- -- TODO: Be careful to not get stuck in a loop when two variables are
--- -- "equal" to each other in the substitution?
--- applySubstRec :: (Show t, Unify t, Ppr t) => Substitution t -> t -> t
--- applySubstRec subst x =
---   let y = applySubst subst x
---       yVars = toListOf fv y
---       notDone = any isJust $ map (substLookup subst) yVars -- NOTE: This could cause an infinite loop if we are not careful
---   in
---   if notDone
---     then applySubstRec subst y
---     else y
+-- substLookup' :: forall t a. (Typeable a, Subst a t, Ppr t, Ppr a) => Substitution t -> Name a -> Maybe a
+-- substLookup' (Substitution xs) x = runIdentity <$> DM.lookup (AName _ x :: AName t a) xs
+
+-- substLookup :: (Typeable t, Subst t t, Ppr t) => Substitution t -> Name t -> Maybe t
+-- substLookup = substLookup'
+
+applySubst :: forall t. Subst t t => Substitution t -> t -> t
+applySubst (Substitution s) = go $ DM.toList s
+  where
+    go :: [DSum (AName t) Identity] -> t -> t
+    go [] x = x
+    go ((AName inj n :=> Identity y) : rest) x = go rest $ subst (coerce n :: Name t) (inject inj y) x
+
+-- TODO: Be careful to not get stuck in a loop when two variables are
+-- "equal" to each other in the substitution?
+applySubstRec :: (Show t, Unify t, Ppr t) => Substitution t -> t -> t
+applySubstRec subst x =
+  let y = applySubst subst x
+      yVars = toListOf fv y
+      notDone = or $ map (\w -> case substLookup subst w of { Just _ -> True; Nothing -> False }) yVars -- NOTE: This could cause an infinite loop if we are not careful
+  in
+  if notDone
+    then applySubstRec subst y
+    else y
 
 extendSubstInj :: (Unify t, Typeable a, Ppr a, Subst t t, Plated a, Unify a, Ppr t, Plated t) =>
   Injection a t ->
@@ -187,7 +200,7 @@ extendSubstInj :: (Unify t, Typeable a, Ppr a, Subst t t, Plated a, Unify a, Ppr
 extendSubstInj inj subst v x =
   case substLookupInj inj subst v of
     Nothing ->
-      let oneSubst = singleSubst v x
+      let oneSubst = singleSubst inj v x
           r = oneSubst <> subst --simplifySubst oneSubst subst
       in
       lift $ Just r
@@ -228,13 +241,13 @@ instance Category Injection where
   id = Injection id Just
   Injection f g . Injection f' g' = Injection (f . f') (g' <=< g)
 
-projectSubstitution :: Ppr t' =>
-  Injection t' t ->
-  Substitution t -> Substitution t'
-projectSubstitution inj = mapSubstitutionMaybe $ \inj2 (AName x, Identity y) -> do
-  case project inj (inject inj2 y) of
-    Nothing -> Nothing
-    Just _ -> Just (AName x :=> Identity y)
+-- projectSubstitution :: Ppr t' =>
+--   Injection t' t ->
+--   Substitution t -> Substitution t'
+-- projectSubstitution inj = mapSubstitutionMaybe $ \inj2 (AName injX x, Identity y) -> do
+--   case project inj (inject inj2 y) of
+--     Nothing -> Nothing
+--     Just _ -> Just (AName _ x :=> Identity y)
 
 injectSubst :: (Subst a a) => Injection b a -> Name a -> b -> a -> a
 injectSubst inj v x y = subst v (inject inj x) y
@@ -246,7 +259,7 @@ mapSubstitutionMaybe :: forall t t'. (forall a. (Typeable a, Ppr t, Ppr a) => In
 mapSubstitutionMaybe f (Substitution xs) = Substitution $ DM.fromList $ mapMaybe go $ DM.toList xs
   where
     go :: DSum (AName t) Identity -> Maybe (DSum (AName t') Identity)
-    go (AName n :=> Identity y) = f undefined (AName n, Identity y)
+    go (AName injN n :=> Identity y) = f injN (AName injN n, Identity y)
 
 unifyListInj :: forall t b. (Plated b, Unify b, Ppr t, Ppr b, Subst t t, Plated t, Typeable b, Unify t) =>
   Injection b t ->

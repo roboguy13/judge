@@ -12,7 +12,9 @@
 module Judge.Examples.STLC
   where
 
-import Prelude hiding (lookup)
+import Prelude hiding (lookup, id, (.))
+
+import Control.Category
 
 -- import Judge.Rule hiding (V (..))
 -- import Judge.Vec
@@ -172,9 +174,6 @@ instance Subst (Meta t) Meta_ where
   -- isvar (Meta (MV x)) = Just (SubstName (coerce x)) -- TODO: Is this right?
   -- isvar _ = Nothing
 
-instance Subst (SubstTrans x Term Term) Term
-instance Subst (SubstTrans x Type Type) Type
-
 instance Subst (Meta t) Type where
   isCoerceVar (TyV x) = Just $ SubstCoerce (coerce x) go
     where
@@ -204,6 +203,12 @@ instance Unify Term where
 instance Ppr (Meta t) where pprDoc (Meta x) = pprDoc x
 instance Ppr [Meta t] where pprDoc xs = text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
 
+metaInj1 :: Injection Meta_ (Meta t)
+metaInj1 = Injection Meta $ \(Meta x) -> Just x
+
+metaInj2 :: Injection (Meta t) Meta_
+metaInj2 = Injection (\(Meta x) -> x) $ (Just . Meta)
+
 instance Ppr Meta_ where
   pprDoc (MV x) = text "?" <.> pprDoc x
   pprDoc (Lookup ctx x a) =
@@ -220,7 +225,7 @@ instance forall k (t :: k). (Typeable k, Typeable t) => Unify (Meta t) where
   mkVar = Meta . MV . coerce
 
   getChildren (Meta x) = coerce <$> getChildren x
-  matchOne (Meta x) (Meta y) = fmap (map (\(UnifyPair a b) -> UnifyPair a b)) <$> matchOne x y
+  matchOne (Meta x) (Meta y) = fmap (map (\(UnifyPair inj a b) -> UnifyPair (metaInj1 . inj) a b)) <$> matchOne x y
 
 instance Subst a Meta_ => Subst a (Meta t)
 
@@ -239,6 +244,16 @@ instance Normalize (Meta a) where normalize = id
 instance Normalize Meta_ where normalize = id
 instance Normalize Term where normalize = id
 
+tyInj_ :: Injection Type Meta_
+tyInj_ = Injection Tp $ \case
+  Tp x -> Just x
+  _ -> Nothing
+
+tmInj_ :: Injection Term Meta_
+tmInj_ = Injection Tm $ \case
+  Tm x -> Just x
+  _ -> Nothing
+
 instance Unify Meta_ where
   mkVar = MV
 
@@ -248,18 +263,18 @@ instance Unify Meta_ where
 
   matchOne (MV {}) (MV {}) = pure Nothing
   matchOne (Lookup x y z) (Lookup x' y' z') =
-    pure $ Just [UnifyPair x x', UnifyPair y y', UnifyPair z z']
+    pure $ Just [UnifyPair id x x', UnifyPair id y y', UnifyPair id z z']
   matchOne (HasType x y z) (HasType x' y' z') =
-    pure $ Just [UnifyPair x x', UnifyPair y y', UnifyPair z z']
+    pure $ Just [UnifyPair id x x', UnifyPair id y y', UnifyPair id z z']
 
   matchOne Empty Empty = pure $ Just []
   matchOne (Extend x y z) (Extend x' y' z') =
-    pure $ Just [UnifyPair x x', UnifyPair y y', UnifyPair z z']
+    pure $ Just [UnifyPair id x x', UnifyPair id y y', UnifyPair id z z']
 
   matchOne (Tm x) (Tm y) =
-    pure $ Just [UnifyPair x y]
+    pure $ Just [UnifyPair tmInj_ x y]
   matchOne (Tp x) (Tp y) =
-    pure $ Just [UnifyPair x y]
+    pure $ Just [UnifyPair tyInj_ x y]
   matchOne _ _ = pure Nothing
 
   -- matchOne (Tm x) (Tm y) = fmap (map (bimap Tm Tm)) <$> matchOne x y
