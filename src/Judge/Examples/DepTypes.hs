@@ -55,47 +55,6 @@ data Term
 
 type Type = Term
 
--- TODO: See if I can use normalization-by-evaluation here
--- data Value a
---   = VUniverse Int
---   | VTyLam (Type a) (Abstraction a)
---   | VLam (Abstraction a)
---
--- data Neutral a
-
-
-
--- getFreeVars :: Term -> [TermName]
--- getFreeVars (VT x) = [x]
--- getFreeVars (Lam x body) =
---   getFreeVars body \\ [x]
--- getFreeVars (TyLam x ty body) =
---   getFreeVars ty ++ (getFreeVars body \\ [x])
--- getFreeVars (App x y) = getFreeVars x ++ getFreeVars y
--- getFreeVars (TyApp x y) = getFreeVars x ++ getFreeVars y
--- getFreeVars (Universe _) = []
--- getFreeVars (Ann x y) = getFreeVars x ++ getFreeVars y
-
--- data Var b a = Obj b | M a
---   deriving (Show, Functor, Foldable, Generic1, Eq, Traversable, Data)
-
--- instance Bifunctor Var where
---   bimap f _ (Obj x) = Obj (f x)
---   bimap _ g (M x) = M (g x)
---
--- instance Applicative (Var b) where
---   pure = M
---   (<*>) = ap
---
--- instance Monad (Var b) where
---   return = pure
---   Obj x >>= _ = Obj x
---   M x >>= f = f x
---
--- instance (Ppr b, Ppr a) => Ppr (Var b a) where
---   pprDoc (Obj x) = pprDoc x
---   pprDoc (M x) = pprDoc x
-
 type MetaName_ = Name Meta_
 
 data Meta_ where
@@ -111,11 +70,19 @@ data Meta_ where
   EvalsTo :: Meta_ -> Meta_ -> Meta_
 
   Tm :: Term -> Meta_
-  -- Substitute
+  Substitute :: Name Term -> Term -> Term -> Name Term -> Meta_
 
   deriving (Show, Generic)
 
 type MetaName t = Name (Meta t)
+
+instance Judgment (Meta t) Term where
+  isSubst (Meta (Substitute a b c d)) = Just (a, b, c, d)
+  isSubst _ = Nothing
+
+  substInj = metaInj1 . tmInj_
+
+  mkSubst a b c d = Meta $ Substitute a b c d
 
 newtype Meta (t :: MSort) = Meta Meta_
   deriving (Show, Generic)
@@ -221,6 +188,7 @@ instance Plated Meta_ where
     Empty -> pure Empty
     Extend x y z -> Extend <$> f x <*> f y <*> f z
     Tm x -> pure $ Tm x
+    Substitute a b c d -> pure $ Substitute a b c d
 
 instance Plated Term where
   plate f = \case
@@ -266,23 +234,9 @@ instance Ppr Meta_ where
   pprDoc (EvalsTo x y) = pprDoc x <+> text "⇓" <+> pprDoc y
   pprDoc (Extend ctx x a) =
     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
+  pprDoc (Substitute a b c d) =
+    text "Substitute" <.> parens(foldr (<+>) mempty (punctuate (text ",") [pprDoc a, pprDoc b, pprDoc c, pprDoc d]))
 
-
--- instance Substitute Term where
---   applySubst subst = (>>= go)
---     where
---       go x =
---         case substLookup subst x of
---           Just r -> r
---           Nothing -> VT x
---
--- instance Substitute (Meta_ b) where
---   applySubst subst = (>>= go)
---     where
---       go x =
---         case substLookup subst x of
---           Just r -> r
---           Nothing -> MV x
 
 instance Unify Term where
   mkVar = VT
@@ -302,16 +256,6 @@ instance FV (Meta t) where
     ,SomeInjection $ metaInj1 . tmInj_
     ]
 instance Alpha Term
-
--- instance Unify Meta_ where
---   getChildren (Tm x) = mkTm <$> getChildren x
---   getChildren x = children x
---
---   matchOne (Tm x) (Tm y) = map (bimap mkTm mkTm) <$> matchOne x y
---   matchOne x y =
---     if toConstr x == toConstr y
---     then Just $ zip (children x) (children y)
---     else Nothing
 
 class MetaC t a where
   getMeta :: a -> Meta t
@@ -351,18 +295,9 @@ evalsTo (Meta x) (Meta y) = Meta $ EvalsTo x y
 tm :: Term -> Meta MTm
 tm = Meta . mkTm
 
--- tm' :: Term -> Meta MTm
--- tm' = Meta . mkTm . fmap (fmap MV)
---
--- tm'' :: Term -> Meta MTm
--- tm'' = Meta . mkTm . fmap (M . MV)
-
 instance IsString Term where fromString = VT . s2n
 instance IsString (Meta t) where fromString = mv
 instance IsString (Name a) where fromString = s2n
-
--- -- retagSubst :: Subst (Meta t a) b -> Subst (Meta t' a) b
--- -- retagSubst = coerce
 
 tcRules :: [Rule (Meta MJudgment)]
 tcRules =
