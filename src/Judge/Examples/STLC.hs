@@ -291,57 +291,6 @@ instance Unify Meta_ where
     pure $ Just [UnifyPair tyInj_ x y]
   matchOne _ _ = pure Nothing
 
-  -- matchOne (Tm x) (Tm y) = fmap (map (bimap Tm Tm)) <$> matchOne x y
-  -- matchOne (Tp x) (Tp y) = fmap (map (bimap Tp Tp)) <$> matchOne x y
-  -- matchOne x y =
-  --   if constrEq x y
-  --   then Just <$> liftA2 zipWith _ (getChildren x) (getChildren y)
-  --   else pure Nothing
-
--- instance Subst (Type Meta_) Meta_ -- TODO: Is this right?
--- instance Subst (Term Meta_) Meta_
---
--- instance Subst (Type Meta_) (Term Meta_)
--- instance Subst (Term Meta_) (Type Meta_)
---
--- instance Subst (SubstTrans x (Type a) (Type a)) (Type a)
--- instance forall (a :: *). (Typeable a) => Subst (SubstTrans x (Term a) (Term a)) (Term a)
---
---
--- instance Subst (SubstTrans x Meta_ Meta_) Meta_
--- -- instance Subst (SubstTrans x Meta_ Meta_) (Type Meta_)
--- instance Subst (SubstTrans x Meta_ Meta_) (Term Meta_)
--- instance Subst (SubstTrans x a a) (Type a)
--- instance Subst a Meta_ => Subst a (Meta t)
---
--- instance Unify Meta_ where
--- --   mkVar = MV
--- --
--- --   getChildren (Tm x) = fmap Tm <$> getChildren x
--- --   getChildren (Tp x) = fmap Tp <$> getChildren x
--- --   getChildren x = pure $ children x
--- --
--- --   matchOne (Tm x) (Tm y) = fmap (map (bimap Tm Tm)) <$> matchOne x y
--- --   matchOne (Tp x) (Tp y) = fmap (map (bimap Tp Tp)) <$> matchOne x y
--- --   matchOne x y =
--- --     if constrEq x y
--- --     then Just <$> liftA2 zipWith _ (getChildren x) (getChildren y)
--- --     else pure Nothing
--- --
--- -- instance Normalize Meta_ where normalize = id
--- -- instance Normalize (Meta t) where normalize = id
--- -- instance Normalize (Term Meta_) where normalize = id
--- -- instance Normalize (Type Meta_) where normalize = id
--- --
--- --
--- --
--- -- -- instance Ppr a => Ppr (Ctx a) where
--- -- --   pprDoc (CtxV x) = pprDoc x
--- -- --   pprDoc Empty = text "Empty"
--- -- --   pprDoc (Extend ctx x a) =
--- -- --     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
--- --
-
 class MetaC t a where
   getMeta :: a -> Meta t
 
@@ -366,52 +315,12 @@ lookup (Meta ctx) (Meta x) (Meta a) = Meta $ Lookup ctx x a
 hasType :: Meta MCtx -> Meta MTm -> Meta MTp -> Meta MJudgment
 hasType (Meta ctx) (Meta x) (Meta a) = Meta $ HasType ctx x a
 
--- -- tm :: Term Meta_ -> Meta MTm
--- -- tm = Meta . Tm
--- --
--- -- tp :: Type Meta_ -> Meta MTp
--- -- tp = Meta . Tp
--- -- -- tm = Meta . mkTm . fmap Obj --coerce . Tm . fmap MV
--- --
 tm' = Meta . Tm
 tp' = Meta . Tp
--- -- -- -- | Turn all object variables into metavariables
--- -- -- tm' :: Term Meta_ -> Meta MTm
--- -- -- tm' = Meta . Tm . rewrite go
--- -- --   where
--- -- --     go (VT x) = Just $ TermM $ MV (coerce x)
--- -- --     go _ = Nothing
--- -- --
--- -- -- tp' :: Type Meta_ -> Meta MTp
--- -- -- tp' = Meta . Tp . rewrite go
--- -- --   where
--- -- --     go (TyV x) = Just $ TypeM $ MV (coerce x)
--- -- --     go _ = Nothing
--- --
--- -- --
--- -- -- tp :: forall b a. Type b -> Meta MTp b a
--- -- -- tp = Meta . mkTp . fmap Obj --coerce . Tp . fmap MV
--- -- --
--- -- -- tm' :: forall b a. Term (Var b a) -> Meta MTm b a
--- -- -- tm' = Meta . mkTm . fmap (fmap MV)
--- -- --
--- -- -- tp' :: forall b a. Type (Var b a) -> Meta MTp b a
--- -- -- tp' = Meta . mkTp . fmap (fmap MV)
--- -- --
--- -- -- tm'' :: forall b a. Term a -> Meta MTm b a
--- -- -- tm'' = Meta . mkTm . fmap (M . MV)
--- -- --
--- -- -- tp'' :: forall b a. Type a -> Meta MTp b a
--- -- -- tp'' = Meta . mkTp . fmap (M . MV)
 
 instance IsString Term where fromString = VT . string2Name
 instance IsString Type where fromString = TyV . string2Name
 instance IsString (Meta t) where fromString = mv
-
--- retagSubst :: Substitution (Meta t) b -> Substitution (Meta t') b
--- retagSubst = coerce
-
-
 
 tcRules :: [Rule (Meta MJudgment)]
 tcRules = --map (toDebruijnRule . fmap L.V)
@@ -495,78 +404,3 @@ test7 = query tcRules
       (tm (App (lam "f" (App "f" (MkBool False))) (lam "x" "x")))
       (mv "a")
 
-test8 = query tcRules
-  $ hasType empty
-      (tm (lam "f" (App "f" (MkBool False))))
-      (tp (Arr (Arr Bool Bool) Bool))
--- --
--- --
--- --
--- -- --
--- -- -- --
--- -- -- -- data PprShow a = PprShow a
--- -- -- --
--- -- -- -- instance Ppr a => Ppr (PprShow a) where pprDoc (PprShow x) = pprDoc x
--- -- -- -- instance Ppr a => Show (PprShow a) where show = ppr
--- -- --
--- -- --
--- -- --
--- -- -- -- empty :: Meta_ String
--- -- -- -- empty = Empty
--- -- -- --
--- -- -- -- extend :: (MetaC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Meta_ String
--- -- -- -- extend ctx x a = Extend (toMeta ctx) (toMeta x) (fmap CtxV (toType a))
--- -- -- --
--- -- -- -- lookup :: (MetaC ctx, MetaC meta, TypeC ty) => ctx -> meta -> ty -> Meta_ String
--- -- -- -- lookup ctx x a = Lookup (toMeta ctx) (toMeta x) (toType a)
--- -- -- --
--- -- -- -- hasType :: (MetaC ctx, TermC term, TypeC ty) => ctx -> term -> ty -> Meta_ String
--- -- -- -- hasType ctx x a = HasType (toMeta ctx) (toTerm x) (toType a)
--- -- -- --
--- -- -- -- mkUnit :: Term a
--- -- -- -- mkUnit = MkUnit
--- -- -- --
--- -- -- -- app :: (TermC term1, TermC term2) => term1 -> term2 -> Term (Meta_ String)
--- -- -- -- app x y = App (toTerm x) (toTerm y)
--- -- -- --
--- -- -- -- lam :: (MetaC meta, TermC term) => meta -> term -> Term (Meta_ String)
--- -- -- -- lam x y = Lam (toMeta x) (toTerm y)
--- -- -- --
--- -- -- -- unit :: Type a
--- -- -- -- unit = Unit
--- -- -- --
--- -- -- -- arr :: (TypeC ty1, TypeC ty2) => ty1 -> ty2 -> Type (Meta_ String)
--- -- -- -- arr x y = Arr (toType x) (toType y)
--- -- -- --
--- -- -- -- -- class MetaC 
--- -- -- --
--- -- -- -- tcRules :: [Rule Meta_ (Name L.V)]
--- -- -- -- tcRules = map (toDebruijnRule . fmap L.V)
--- -- -- --   [fact $ lookup (extend "ctx" "x" "a") "x" "a"
--- -- -- --   ,lookup (extend "ctx" "x" "a") "y" "b"
--- -- -- --     :-
--- -- -- --     [lookup "ctx" "y" "b"]
--- -- -- --
--- -- -- --   ,fact $ hasType @_ @(Term (Meta_ String)) @(Type (Meta_ String))
--- -- -- --             "ctx" mkUnit unit
--- -- -- --
--- -- -- --   ,hasType "ctx" (app "x" "y") "b"
--- -- -- --     :-
--- -- -- --     [hasType "ctx" "x" (arr "a" "b")
--- -- -- --     ,hasType "ctx" "y" "a"
--- -- -- --     ]
--- -- -- --
--- -- -- --   ,hasType "ctx" (lam "x" "body") (arr "a" "b")
--- -- -- --     :-
--- -- -- --     [hasType (extend "ctx" "x" "a") "body" "b"
--- -- -- --     ]
--- -- -- --   ]
--- -- --
--- -- -- -- test1 =
--- -- -- --   query tcRules
--- -- -- --     $ HasType Empty MkUnit Unit
--- -- --
--- -- -- -- test2 =
--- -- -- --   query tcRules
--- -- -- --     $ HasType Empty (Lam (MV (L.V "x")) MkUnit) (TyV (MV (L.V "a")))
--- -- --

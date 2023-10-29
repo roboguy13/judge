@@ -52,17 +52,6 @@ data SomeInjection a = forall b. (Alpha b, Typeable b) => SomeInjection (Injecti
 
 class FV a where
   getInjections :: proxy a -> [SomeInjection a]
-  -- getFVs :: a -> [AnyName]
-
--- freshenFVs :: forall t m. (Unify t, Fresh m, Alpha t) => FV t => t -> m t
--- freshenFVs = go (SomeInjection id : getInjections (Proxy @t))
---   where
---     go [] t = pure t
---     go (SomeInjection (inj :: Injection b t) : rest) t = do
---       let fvs = toListOf fv t :: [Name b]
---       traceM $ "fvs = " ++ show fvs
---       t' <- freshenVars (map coerce fvs) t -- TODO: Do I actually need to use the injections here?
---       go rest t'
 
 freshenVars :: (Fresh m, Unify a) => [Name a] -> Rule a -> m (Rule a)
 freshenVars vs x = do

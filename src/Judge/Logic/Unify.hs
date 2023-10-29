@@ -109,18 +109,8 @@ data AName t a where
 
 instance Ppr (AName t a) where pprDoc (AName _ x) = pprDoc x
 
--- retagAName :: (Ppr t', Subst a t') => AName t a -> AName t' a
--- retagAName (AName inj x) = AName _ $ coerce x
-
--- instance GShow (AName t)
-
 newtype Substitution t = Substitution (DMap (AName t) Identity)
   deriving (Semigroup, Monoid)
-
--- instance Show t => Show (Substitution t) where
---   show (Substitution xs) = go $ toList xs
---     where
---       go (x :=> y) = Show
 
 instance (Alpha t, Typeable t, Ppr t) => Show (Substitution t) where
   show = ppr
@@ -170,12 +160,6 @@ substLookupInj inj (Substitution xs) v = do
 
 substLookup :: (Typeable t, Subst t t, Ppr t) => Substitution t -> Name t -> Maybe t
 substLookup = substLookupInj id
-
--- substLookup' :: forall t a. (Typeable a, Subst a t, Ppr t, Ppr a) => Substitution t -> Name a -> Maybe a
--- substLookup' (Substitution xs) x = runIdentity <$> DM.lookup (AName _ x :: AName t a) xs
-
--- substLookup :: (Typeable t, Subst t t, Ppr t) => Substitution t -> Name t -> Maybe t
--- substLookup = substLookup'
 
 applySubst :: forall t. Subst t t => Substitution t -> t -> t
 applySubst (Substitution s) = go $ DM.toList s
@@ -249,14 +233,6 @@ project (Injection _ g) = g
 instance Category Injection where
   id = Injection id Just
   Injection f g . Injection f' g' = Injection (f . f') (g' <=< g)
-
--- projectSubstitution :: Ppr t' =>
---   Injection t' t ->
---   Substitution t -> Substitution t'
--- projectSubstitution inj = mapSubstitutionMaybe $ \inj2 (AName injX x, Identity y) -> do
---   case project inj (inject inj2 y) of
---     Nothing -> Nothing
---     Just _ -> Just (AName _ x :=> Identity y)
 
 injectSubst :: (Subst a a) => Injection b a -> Name a -> b -> a -> a
 injectSubst inj v x y = subst v (inject inj x) y
