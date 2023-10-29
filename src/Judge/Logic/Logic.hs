@@ -73,6 +73,7 @@ data QueryResult t =
   { queryOrigVars :: [Name t]
   , queryResults :: [(Derivation t, Substitution t)]
   }
+  deriving (Show)
 
 substDerivation :: (Show t, Unify t, Ppr t) =>
   Substitution t -> Derivation t -> Derivation t
@@ -137,10 +138,10 @@ querySubst subst rules goal0 = do
   let goal = applySubstRec subst $ normalize goal0
 
   newSubst <-
-    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
 
-  () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst)
+  -- () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule) ++ " to get\n^====> " ++ ppr newSubst)
 
   case map (applySubstRec newSubst) (ruleBody rule) of
     [] -> pure (DerivationStep goal [], newSubst)

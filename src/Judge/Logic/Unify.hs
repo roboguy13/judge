@@ -10,6 +10,7 @@
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE ImpredicativeTypes #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE TemplateHaskell #-}
 
 module Judge.Logic.Unify
   where
@@ -25,8 +26,12 @@ import Data.Bifunctor
 import Data.Foldable
 import Data.Coerce
 
+import Data.Functor.Compose
+
 import Data.List hiding (lookup)
 import Data.Maybe
+
+import Data.Function
 
 import GHC.Generics
 
@@ -47,6 +52,7 @@ import Data.Void
 
 import Data.Type.Equality
 
+import Data.Constraint.Extras.TH
 import Data.Constraint
 import Data.Constraint.Forall
 import Data.Constraint.Deferrable
@@ -68,7 +74,9 @@ class Normalize t where
   normalize :: t -> t
 
 -- data UnifyPair t = forall a. (Subst a t, Subst t a, Subst a a, forall x. Subst (SubstTrans x t a) t, Plated a, UnifyC a) => UnifyPair a a
-data UnifyPair t = forall a. (Subst a t, Subst t a, Subst a a, Plated a, UnifyC a) => UnifyPair a a
+data UnifyPair t = forall a. (Show a, Subst a t, Subst t a, Plated a, UnifyC a) => UnifyPair a a
+
+deriving instance Show (UnifyPair t)
 
 -- data UnifyPair t = forall a. (Subst a t, forall x. Subst t x => Subst a x, Plated a, UnifyC a) => UnifyPair a a
 -- data UnifyPair' t t' = forall a. (Subst a t, Subst t t', Subst a t', Plated a, UnifyC a) => UnifyPair' a a
@@ -119,15 +127,28 @@ getVar x =
     Nothing -> Nothing
 
 data AName t a where
-  AName :: (Typeable a, Subst a t, Ppr t, Ppr a) => Name a -> AName t a
+  AName :: (Typeable a, Ppr t, Ppr a) => SubstDict a t -> Name a -> AName t a
 
 instance Ppr (AName t a) where pprDoc (AName x) = pprDoc x
 
-data PairC c a b where
-  PairC :: c a b => a -> b -> PairC c a b
+retagAName :: (Ppr t', Subst a t') => AName t a -> AName t' a
+retagAName (AName x) = AName $ coerce x
+
+-- instance GShow (AName t)
 
 newtype Substitution t = Substitution (DMap (AName t) Identity)
   deriving (Semigroup, Monoid)
+
+-- instance Show t => Show (Substitution t) where
+--   show (Substitution xs) = go $ toList xs
+--     where
+--       go (x :=> y) = Show
+
+-- data PairC c a b where
+--   PairC :: c a b => a -> b -> PairC c a b
+
+instance (Alpha t, Typeable t, Ppr t) => Show (Substitution t) where
+  show = ppr
 
 applySubst :: forall t. (Unify t, Subst t t) => Substitution t -> t -> t
 applySubst (Substitution s) = go $ DM.toList s
@@ -138,7 +159,10 @@ applySubst (Substitution s) = go $ DM.toList s
 
 instance (Alpha t, Typeable t, Ppr t) => Ppr (Substitution t) where
   -- pprDoc (Substitution []) = text "yes"
-  pprDoc (Substitution xs0) = foldr1 ($$) (map go (DM.toList xs0)) --(map go (nub (DM.toList xs0)))
+  pprDoc (Substitution xs0) =
+      case DM.toList xs0 of
+        [] -> text "[]" 
+        _ -> foldr1 ($$) (map go (DM.toList xs0)) --(map go (nub (DM.toList xs0)))
     where
       go :: DSum (AName t) Identity -> Doc
       go (x@AName{} :=> y) = pprDoc x <+> text "=" <+> pprDoc y
@@ -166,8 +190,11 @@ instance GCompare (AName t) where
           EQ -> GEQ
           GT -> GGT
 
-substLookup' :: forall t a. (Typeable a, Subst a t, Ppr t, Ppr a) => Substitution t -> Name a -> Maybe a
+substLookup' :: forall t a. (Typeable a, Ppr t, Ppr a) => Substitution t -> Name a -> Maybe a
 substLookup' (Substitution xs) x = runIdentity <$> DM.lookup (AName x :: AName t a) xs
+
+-- substLookupDict :: forall t a. (Typeable a, Ppr t, Ppr a) => SubstDict a t -> Substitution t -> Name a -> Maybe a
+-- substLookupDict (Substitution 
 
 substLookup :: (Typeable t, Subst t t, Ppr t) => Substitution t -> Name t -> Maybe t
 substLookup = substLookup'
@@ -204,16 +231,28 @@ unify = unifySubst mempty
 unifySubst :: forall t. (Unify t, Ppr t, Normalize t, UnifyC t, Plated t) => Substitution t -> t -> t -> Maybe (Substitution t)
 unifySubst subst x y = runFreshMT $ unifySubst' subst (normalize x) (normalize y)
 
-unifySubst' :: forall t a. (Unify t, Unify a, Plated a, Ppr t, Subst a t, Subst t a, Plated t, Ppr a) => Substitution t -> a -> a -> FreshMT Maybe (Substitution t)
-unifySubst' subst x y
-  | Just xV <- getVar @a x = unifyVar subst xV y
+unifySubstDict :: forall t a. (Unify t, Unify a, Plated a, Ppr t, Plated t, Ppr a) => SubstDict a t -> SubstDict t a -> Substitution t -> a -> a -> FreshMT Maybe (Substitution t)
+unifySubstDict dictAT dictTA subst x y
+  | Just xV <- getVar @a x = unifyVar _ _ subst xV y
 
-  | Just yV <- getVar @a y = unifyVar subst yV x
+  | Just yV <- getVar @a y = unifyVar _ _ subst yV x
 
   | otherwise =
       matchOne @a x y >>= \case
-        Just paired -> unifyList subst paired
+        Just paired -> unifyList dictAT dictTA subst paired
         Nothing -> lift Nothing
+
+unifySubst' :: forall t a. (Unify t, Unify a, Plated a, Ppr t, Subst a t, Subst t a, Plated t, Ppr a) => Substitution t -> a -> a -> FreshMT Maybe (Substitution t)
+unifySubst' = undefined
+-- unifySubst' subst x y
+--   | Just xV <- getVar @a x = unifyVar subst xV y
+--
+--   | Just yV <- getVar @a y = unifyVar subst yV x
+--
+--   | otherwise =
+--       matchOne @a x y >>= \case
+--         Just paired -> unifyList subst paired
+--         Nothing -> lift Nothing
 
 newtype SubstTrans (a :: *) (b :: *) c = SubstTrans c
   deriving newtype Ppr
@@ -277,27 +316,73 @@ instance forall a b c. (Unify b, Unify a, Unify c, Subst a b, Subst b c) => Subs
 
   substBvs ctx bs (SubstTrans x) = SubstTrans $ substBvs ctx (map (convert @_ @b) bs) x
 
--- instance Subst c c => Subst (SubstTrans a b c) (SubstTrans a b c) where
---   isvar x = undefined
---
---   isCoerceVar x = do
---     undefined
---
---   subst v x y =
---     undefined
---
---   substs [] y = undefined
---   substs ((v, x) : rest) y = undefined --substs rest (subst v x y)
---
---   substBvs ctx bs x = undefined
+-- TODO: See if there's a better way, to avoid manual dictionary passing
+data SubstDict b a =
+  SubstDict
+  { dictIsVar :: a -> Maybe (SubstName a b)
+  , dictIsCoerceVar :: a -> Maybe (SubstCoerce a b)
+  , dictSubst :: Name b -> b -> a -> a
+  , dictSubsts :: [(Name b, b)] -> a -> a
+  , dictSubstBvs :: AlphaCtx -> [b] -> a -> a
+  }
 
-unifyList :: forall t b. (Plated b, Unify b, Ppr t, Ppr b, Subst b t, Subst t b, Plated t, Typeable b, Unify t
+substDictFromInst :: Subst b a => SubstDict b a
+substDictFromInst =
+  SubstDict
+  { dictIsVar = isvar
+  , dictIsCoerceVar = isCoerceVar
+  , dictSubst = subst
+  , dictSubsts = substs
+  , dictSubstBvs = substBvs
+  }
+
+dictConvert :: forall a b. Unify b => SubstDict a b -> a -> b
+dictConvert dict x =
+  let v = s2n "__"
+  in
+  dictSubst dict v x $ mkVar @b (coerce v)
+
+substDictCompose :: forall a b c. (Unify b, Unify c) => SubstDict a b -> SubstDict b c -> SubstDict a c
+substDictCompose dictAB dictBC =
+  let self =
+        SubstDict
+        { dictIsVar = \_ -> Nothing
+        , dictIsCoerceVar = \s -> do
+            let convertTrans :: a -> c
+                convertTrans = dictConvert dictBC . dictConvert dictAB
+
+            SubstCoerce x f <- dictIsCoerceVar dictBC s
+            SubstCoerce y g <- dictIsCoerceVar dictAB $ mkVar x
+            pure $ SubstCoerce y (Just . convertTrans)
+        , dictSubst = \v x y ->
+            let z = dictConvert dictAB x
+            in
+            dictSubst dictBC (coerce v) z y
+            -- SubstTrans $ subst (coerce v) z y
+        , dictSubsts = fix $ \rec xs y ->
+            case xs of
+              [] -> y
+              ((v :: Name t, x) : rest) ->
+                rec rest (dictSubst self v x y)
+        , dictSubstBvs = \ctx bs x ->
+            dictSubstBvs dictBC ctx (map (dictConvert dictAB) bs) x
+        }
+  in self
+
+mapSubstitution :: forall t t'. (forall a. (Typeable a, Subst a t, Ppr t, Ppr a) => (AName t a, Identity a) -> DSum (AName t') Identity)
+  -> Substitution t -> Substitution t'
+mapSubstitution f (Substitution xs) = Substitution $ DM.fromList $ map go $ DM.toList xs
+  where
+    go :: DSum (AName t) Identity -> DSum (AName t') Identity
+    go (AName dict n :=> Identity y) = f (AName n, Identity y)
+
+unifyList :: forall t b. (Plated b, Unify b, Ppr t, Ppr b, Plated t, Typeable b, Unify t
                          -- , forall x. Subst x t => Subst (SubstTrans b t x) t
                          -- , forall x. Subst (SubstTrans b t x) (SubstTrans b t x)
                          ) =>
-  Substitution t -> [UnifyPair b] -> FreshMT Maybe (Substitution t)
-unifyList subst [] = lift $ Just subst
-unifyList subst (UnifyPair (x :: a) y : rest) = do
+  SubstDict b t -> SubstDict t b -> Substitution t -> [UnifyPair b] -> FreshMT Maybe (Substitution t)
+unifyList _ _ subst [] = lift $ Just subst
+unifyList dictBT dictTB subst (UnifyPair (x :: a) y : rest) = do
   -- let p :: Dict (Subst a (SubstTrans a b t))
   --     p = Dict
   -- undefined
@@ -306,11 +391,17 @@ unifyList subst (UnifyPair (x :: a) y : rest) = do
   --     q = Dict
   -- undefined
 
-  subst' <- unifySubst' subst (convert @a @b x) (convert @a @b y) --(SubstTrans x) (SubstTrans y :: SubstTrans t b a)
-  unifyList subst' rest
+  -- subst' <- unifySubst' subst (convert @a @b x) (convert @a @b y) --(SubstTrans x) (SubstTrans y :: SubstTrans t b a)
 
-unifyVar :: forall t a. (Ppr t, Unify t, Unify a, Plated a, Subst t a, Subst a t, Plated t, Ppr a) => Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
-unifyVar subst xV y =
+  subst' <- unifySubstDict
+              (substDictCompose (substDictFromInst :: SubstDict a b) dictBT)
+              (substDictCompose dictTB (substDictFromInst :: SubstDict b a))
+              subst x y
+  unifyList dictBT dictTB subst' rest
+
+unifyVar :: forall t a. (Ppr t, Unify t, Unify a, Plated a, Plated t, Ppr a) =>
+  SubstDict t a -> SubstDict a t -> Substitution t -> Name a -> a -> FreshMT Maybe (Substitution t)
+unifyVar dictTA dictAT subst xV y =
     occursCheck xV y >>= \case
       True -> lift Nothing
       False ->
@@ -320,7 +411,7 @@ unifyVar subst xV y =
                           occursCheck xV yInst >>= \case
                             True -> lift Nothing
                             -- False -> unifySubst' @t subst (mkVar @t xV) yInst
-                            False -> unifySubst' subst (mkVar xV) yInst
+                            False -> unifySubstDict dictAT dictTA subst (mkVar xV) yInst
                         Nothing -> extendSubst subst xV y
           Nothing -> extendSubst subst xV y
 
@@ -331,4 +422,6 @@ occursCheck v x
   | otherwise = do
       xs <- getChildren x >>= traverse (occursCheck v)
       pure $ or xs
+
+-- deriveArgDict ''Substitution
 

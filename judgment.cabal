@@ -84,6 +84,7 @@ library
                       streams,
                       unbound-generics,
                       tasty,
+                      constraints-extras,
 
     -- Directories containing source files.
     hs-source-dirs:   src
