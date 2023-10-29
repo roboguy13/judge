@@ -124,6 +124,8 @@ data Meta_ where
   Tm :: Term -> Meta_
   deriving (Show, Generic)
 
+instance Judgment (Meta t) where isSubst _ = Nothing
+
 instance FV (Meta t) where
   getInjections _ =
     [SomeInjection metaInj1
@@ -229,6 +231,7 @@ instance Ppr Meta_ where
   pprDoc Empty = text "Empty"
   pprDoc (Extend ctx x a) =
     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
+
 instance forall k (t :: k). (Typeable k, Typeable t) => Unify (Meta t) where
   mkVar = Meta . MV . coerce
 

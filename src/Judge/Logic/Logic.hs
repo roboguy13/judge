@@ -43,6 +43,17 @@ import Unbound.Generics.LocallyNameless
 import Data.Proxy
 import Data.Coerce
 
+class Judgment a where
+    -- | Is substitution judgment
+  isSubst :: a ->
+             Maybe
+               (Name a -- Substitute this
+               ,a      -- ... and put this
+               ,a      -- ... in this
+               ,Name a -- .. and store result in this
+               )
+  mkSubst :: Name a -> a -> a -> Name a -> a
+
 data Rule t = t :- [t]
   deriving (Show, Foldable, Functor, Generic)
 
@@ -143,7 +154,7 @@ queryResultSubsts qr = error "queryResultSubsts: TODO: implement"
   --       go :: a -> (Either (Name a) a, f (Either (Name a) a))
   --       go x = (Right x, applySubstRec subst (mkVar (Right x)))
 --
-type QueryC t = (Ppr [t], Show t, Ppr t, Plated t, Unify t, Normalize t, FV t)
+type QueryC t = (Ppr [t], Show t, Ppr t, Plated t, Unify t, Normalize t, FV t, Judgment t)
 
 mkQueryResult :: QueryC t =>
   (t -> [(Derivation t, Substitution t)]) -> (t -> QueryResult t)
@@ -169,14 +180,13 @@ query rules =
         rules' <- traverse freshenRule rules
         querySubst mempty rules' goal
 
-querySubst :: (QueryC t) =>
+-- | For judgments that are not a builtin judgment (like a substitution judgment)
+queryRegularJudgment :: (QueryC t) =>
   Substitution t -> [Rule t] -> t -> FreshMT [] (Derivation t, Substitution t)
-querySubst subst rules goal0 = do
+queryRegularJudgment subst rules goal = do
   rule <- lift rules
 
   -- rule <- freshenRule rule0
-
-  let goal = applySubstRec subst $ normalize goal0
 
   newSubst <-
     -- trace ("rule fvs = " ++ show (ruleFvs rule0)) $
@@ -193,6 +203,30 @@ querySubst subst rules goal0 = do
     newGoals -> do
       (derivs, newSubst') <- querySubstAll newSubst rules $ map (applySubstRec newSubst) newGoals
       pure (DerivationStep goal derivs, newSubst')
+
+querySubst :: (QueryC t) =>
+  Substitution t -> [Rule t] -> t -> FreshMT [] (Derivation t, Substitution t)
+querySubst subst rules goal0 =
+  let goal = applySubstRec subst $ normalize goal0
+  in
+  case isSubst goal of
+    Just s -> querySubstituteJ subst s
+    Nothing -> queryRegularJudgment subst rules goal
+
+
+querySubstituteJ :: QueryC t =>
+  Substitution t ->
+  (Name t -- Substitute for this
+  ,t      -- ... and put this
+  ,t      -- ... in this
+  ,Name t -- .. and store result in this
+  ) ->
+  FreshMT [] (Derivation t, Substitution t)
+querySubstituteJ st (v, x, z, r) = do
+  let result = subst v x z
+  newSt <- lift $ maybeToList $ runFreshMT $ unifyVarInj id st r result
+  let deriv = DerivationStep result [DerivationStep (mkSubst v x z r) []]
+  pure (deriv, newSt)
 
 
 querySubstAll :: (QueryC t) =>
