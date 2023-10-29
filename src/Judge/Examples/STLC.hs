@@ -124,7 +124,7 @@ data Meta_ where
   Tm :: Term -> Meta_
   deriving (Show, Generic)
 
-instance Judgment (Meta t) where isSubst _ = Nothing
+instance Judgment (Meta t) Term where isSubst _ = Nothing
 
 instance FV (Meta t) where
   getInjections _ =
