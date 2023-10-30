@@ -79,7 +79,11 @@ data UnifyPair t = forall a. (Show a, Subst a t, Subst a a, Plated a, UnifyC a) 
 
 -- deriving instance Show (UnifyPair t)
 
-class (Alpha t, Typeable t, Subst t t) => Unify t where
+class (Alpha t, Typeable t, Subst t t, Eq (UConst t)) => Unify t where
+  type UConst t
+
+  isConst :: t -> Maybe (UConst t)
+
   mkVar :: Name t -> t
 
   matchOne :: Fresh m => t -> t -> m (Maybe [UnifyPair t]) -- | If the constructors match, give back the children for each
@@ -96,13 +100,15 @@ class (Alpha t, Typeable t, Subst t t) => Unify t where
 
 type UnifyC t = (Subst t t, Ppr t, Unify t, Show t) --, Traversable f, Plated t, Data a, Monad f, Show a, Show (f a))
 
-getVar :: forall t a. Subst a t => t -> Maybe (Name a)
-getVar x =
-  case isvar @a @t x of
-    Just (SubstName n) -> Just n
-    _ -> case isCoerceVar @a @t x of
-      Just (SubstCoerce n _) -> Just n
-      Nothing -> Nothing
+getVar :: forall t a. (Unify t, Subst a t) => t -> Maybe (Name a)
+getVar x
+  | Just _ <- isConst x = Nothing
+  | otherwise =
+      case isvar @a @t x of
+        Just (SubstName n) -> Just n
+        _ -> case isCoerceVar @a @t x of
+          Just (SubstCoerce n _) -> Just n
+          Nothing -> Nothing
 
 data AName t a where
   AName :: (Typeable a, Ppr t, Ppr a) => Injection a t -> Name a -> AName t a
@@ -125,7 +131,7 @@ instance (Alpha t, Typeable t, Ppr t) => Ppr (Substitution t) where
       go :: DSum (AName t) Identity -> Doc
       go (x@AName{} :=> y) = pprDoc x <+> text "=" <+> pprDoc y
 
-singleSubst :: (Typeable a, Subst a a, Ppr t, Ppr a) =>
+singleSubst :: (Typeable a, Unify a, Subst a a, Ppr t, Ppr a) =>
   Injection a t ->
   Name a -> a -> Substitution t
 singleSubst inj xV y
@@ -210,6 +216,10 @@ unifySubstInj :: forall t a. (Unify t, Unify a, Plated a, Ppr t, Subst t t, Plat
   Injection a t ->
   Substitution t -> a -> a -> FreshMT Maybe (Substitution t)
 unifySubstInj inj subst x y
+  | Just xC <- isConst x, Just yC <- isConst y =
+      if xC == yC
+      then pure subst
+      else lift Nothing
   | Just xV <- getVar @a x = unifyVarInj inj subst xV y
 
   | Just yV <- getVar @a y = unifyVarInj inj subst yV x

@@ -48,20 +48,21 @@ import Unbound.Generics.LocallyNameless.Unsafe
 type TypeName = Name Type
 type TermName = Name Term
 
-data Type = {- TypeM a | -} TyV TypeName | Bool | Unit | Arr Type Type
+data Type = TyV TypeName | Bool | Unit | Arr Type Type
   deriving (Show, Generic)
 
 data Term where
-  VT :: TermName -> Term
+  VT :: TermName -> Term -- | Object-level variables
+  MT :: TermName -> Term -- | Meta-level variables
   App :: Term -> Term -> Term
   Lam :: Bind TermName Term -> Term
   MkUnit :: Term
   MkBool :: Bool -> Term
-  -- TermM :: a -> Term a
   deriving (Show, Generic)
 
 instance Ppr Term where
   pprDoc (VT x) = pprDoc x
+  pprDoc (MT x) = text "?" <.> pprDoc x
   pprDoc (App x y) = parens (pprDoc x) <+> pprDoc y
   pprDoc (Lam bnd) = 
     let (x, body) = unsafeUnbind bnd
@@ -93,6 +94,7 @@ instance Subst Type Type where
 
 instance Subst Term Term where
   isvar (VT x) = Just $ SubstName x
+  isvar (MT x) = Just $ SubstName x
   isvar _ = Nothing
 
 instance Plated Type where
@@ -105,6 +107,7 @@ instance Plated Type where
 instance Plated Term where
   plate f = \case
     VT x -> pure $ VT x
+    MT x -> pure $ MT x
     App x y -> App <$> f x <*> f y
     Lam bnd ->
       let (vs, body) = unsafeUnbind bnd
@@ -124,7 +127,26 @@ data Meta_ where
   Tm :: Term -> Meta_
   deriving (Show, Generic)
 
-instance Judgment (Meta t) Term where isSubst _ = Nothing
+data SideCond where
+  IsVar :: TermName -> SideCond
+  deriving (Show, Generic)
+
+instance Ppr SideCond where pprDoc = text . show
+instance Ppr [SideCond] where pprDoc = text . show
+
+instance Alpha SideCond
+
+instance Subst (Meta t) SideCond
+
+instance Judgment (Meta t) Term where
+  type Side (Meta t) = SideCond
+  isSubst _ = Nothing
+
+  substInj = metaInj1 . tmInj_
+
+  getSideVar (IsVar x) = x
+  testSideCondition (IsVar _) (Meta (Tm (VT _))) = True
+  testSideCondition (IsVar _) _ = False
 
 instance FV (Meta t) where
   getInjections _ =
@@ -191,8 +213,14 @@ instance Subst (Meta t) Type where
       go _ = Nothing
   isCoerceVar _ = Nothing
 
+isAnyVar :: Term -> Maybe TermName
+isAnyVar (VT x) = Just x
+isAnyVar (MT x) = Just x
+isAnyVar _ = Nothing
+
 instance Subst (Meta t) Term where
-  isCoerceVar (VT x) = Just $ SubstCoerce (coerce x) go
+  isCoerceVar x0 | Just x <- isAnyVar x0 =
+      Just $ SubstCoerce (coerce x) go
     where
       go (Meta (Tm t)) = Just t
       go _ = Nothing
@@ -201,14 +229,19 @@ instance Subst (Meta t) Term where
 type MetaName t = Name (Meta t)
 
 instance Unify Type where
+  type UConst Type = TypeName
   mkVar = TyV
+  isConst _ = Nothing
   getChildren = pure . children
 
 instance Unify Term where
-  mkVar = VT
+  type UConst Term = TermName
+  mkVar = MT
+  isConst (VT x) = Just x
+  isConst _ = Nothing
   getChildren (Lam bnd) = do
     (x, body) <- unbind bnd
-    pure [VT x, body]
+    pure [MT x, body]
   getChildren x = pure $ children x
 instance Ppr (Meta t) where pprDoc (Meta x) = pprDoc x
 instance Ppr [Meta t] where pprDoc xs = text "[" <.> foldr (<+>) mempty (punctuate (text ",") (map pprDoc xs)) <.> text "]"
@@ -233,7 +266,11 @@ instance Ppr Meta_ where
     text "Extend" <.> parens (foldr (<+>) mempty (punctuate (text ",") [pprDoc ctx, pprDoc x, pprDoc a]))
 
 instance forall k (t :: k). (Typeable k, Typeable t) => Unify (Meta t) where
+  type UConst (Meta t) = Void
+
   mkVar = Meta . MV . coerce
+
+  isConst _ = Nothing
 
   getChildren (Meta x) = coerce <$> getChildren x
   matchOne (Meta x) (Meta y) = fmap (map (\(UnifyPair inj a b) -> UnifyPair (metaInj1 . inj) a b)) <$> matchOne x y
@@ -272,7 +309,10 @@ tmInj_ = Injection Tm $ \case
   _ -> Nothing
 
 instance Unify Meta_ where
+  type UConst Meta_ = Void
   mkVar = MV
+
+  isConst _ = Nothing
 
   getChildren (Tm x) = fmap Tm <$> getChildren x
   getChildren (Tp x) = fmap Tp <$> getChildren x
@@ -309,10 +349,10 @@ mv = Meta . MV . string2Name
 empty :: Meta MCtx
 empty = coerce Empty
 
-extend :: Meta MCtx -> Meta MName -> Meta MTp -> Meta MCtx
+extend :: Meta MCtx -> Meta MTm -> Meta MTp -> Meta MCtx
 extend (Meta ctx) (Meta x) (Meta a) = Meta $ Extend ctx x a
 
-lookup :: Meta MCtx -> Meta MName -> Meta MTp -> Meta MJudgment
+lookup :: Meta MCtx -> Meta MTm -> Meta MTp -> Meta MJudgment
 lookup (Meta ctx) (Meta x) (Meta a) = Meta $ Lookup ctx x a
 
 hasType :: Meta MCtx -> Meta MTm -> Meta MTp -> Meta MJudgment
@@ -325,32 +365,38 @@ instance IsString Term where fromString = VT . string2Name
 instance IsString Type where fromString = TyV . string2Name
 instance IsString (Meta t) where fromString = mv
 
+tmV :: String -> Meta MTm
+tmV = Meta . Tm . MT . string2Name
+
 tcRules :: [Rule (Meta MJudgment)]
 tcRules = --map (toDebruijnRule . fmap L.V)
-  [fact $ lookup (extend "ctx" "x" "a") "x" "a"
-  ,lookup (extend "ctx" "x" "a") "y" "b"
+  [fact $ lookup (extend "ctx" (tmV "x") "a") (tmV "x") "a"
+  ,lookup (extend "ctx" (tmV "x") "a") (tmV "y") "b"
     :-
-      [lookup "ctx" "y" "b"]
+      [lookup "ctx" (tmV "y") "b"]
 
-  ,hasType "ctx" (mv "x") "a" -- T-Var
-    :-
-      [lookup "ctx" (mv "x") "a"]
+  ,hasType "ctx" (tmV "x") "a" -- T-Var
+    :-!
+      ([lookup "ctx" (tmV "x") "a"]
+      ,[]
+      -- ,[IsVar $ s2n "x"]
+      )
 
 
   ,fact $ hasType -- T-Unit
             "ctx" (tm' MkUnit) (tp' Unit)
 
-  ,hasType "ctx" (tm' (App "x" "y")) "b" -- T-App
+  ,hasType "ctx" (tm' (App (MT $ s2n "x") (MT $ s2n "y"))) "b" -- T-App
     :-
-      [hasType "ctx" "y" "a"
-      ,hasType "ctx" "x" (tp' (Arr "a" "b"))
+      [hasType "ctx" (tmV "y") "a"
+      ,hasType "ctx" (tmV "x") (tp' (Arr "a" "b"))
       ]
 
-  ,hasType "ctx" (tm' (lam "x" "body")) (tp' (Arr "a" "b")) -- T-Lam
+  ,hasType "ctx" (tm' (lam "x" (MT $ s2n "body"))) (tp' (Arr "a" "b")) -- T-Lam
     :-
       [hasType
-        (extend "ctx" "x" "a")
-        "body"
+        (extend "ctx" (tmV "x") "a")
+        (tmV "body")
         "b"
       ]
 
