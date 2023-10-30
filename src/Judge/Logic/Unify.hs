@@ -45,6 +45,7 @@ import Control.Lens hiding (getConst, Wrapped)
 import Control.Applicative hiding (Const, getConst)
 import Control.Monad
 import Control.Monad.Trans
+import Control.Monad.State
 
 import Data.Data hiding (typeRep)
 
@@ -211,6 +212,20 @@ unify = unifySubst mempty
 
 unifySubst :: forall t. (Unify t, Ppr t, Normalize t, UnifyC t, Plated t) => Substitution t -> t -> t -> Maybe (Substitution t)
 unifySubst subst x y = runFreshMT $ unifySubstInj id subst (normalize x) (normalize y)
+
+unifySubstM :: forall t. (Unify t, Ppr t, Normalize t, UnifyC t, Plated t) => Substitution t -> t -> t -> FreshM (Maybe (Substitution t))
+unifySubstM subst x y = collapseFresh' $ unifySubstInj id subst (normalize x) (normalize y)
+
+collapseFresh' :: Monad m => FreshMT m a -> FreshM (m a)
+collapseFresh' = FreshMT . collapseStateT' . unFreshMT
+
+collapseStateT' :: Monad m => StateT Integer m a -> State Integer (m a)
+collapseStateT' st = StateT $ \s ->
+  let results = evalStateT st s
+  in Identity (results, s)
+
+unifyM :: forall t. (Ppr t, Normalize t, UnifyC t, Plated t) => t -> t -> FreshM (Maybe (Substitution t))
+unifyM x y = collapseFresh' $ unifySubstInj id mempty (normalize x) (normalize y)
 
 unifySubstInj :: forall t a. (Unify t, Unify a, Plated a, Ppr t, Subst t t, Plated t, Ppr a) =>
   Injection a t ->

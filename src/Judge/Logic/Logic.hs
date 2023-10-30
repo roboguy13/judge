@@ -36,6 +36,7 @@ import Control.Lens.Plated
 import Control.Lens hiding ((<.>))
 
 import Control.Monad.State
+import Control.Monad.Morph
 
 import GHC.Generics hiding (to)
 
@@ -221,9 +222,6 @@ collapseStateT st = StateT $ \s ->
   let results = evalStateT st s  -- Run the StateT to get a list of (a, Int) pairs
   in Identity (results, s)
 
-generalize :: Monad m => Identity a -> m a
-generalize = return . runIdentity
-
 -- liftAlt :: (MonadTrans t, Monad (t [])) =>
 --   (forall x. t [] x -> [x]) ->
 --   t [] a -> t [] a -> t [] a
@@ -247,8 +245,10 @@ queryRegularJudgment subst rule rules goal = do
 
   newSubst <-
     -- trace ("rule fvs = " ++ show (ruleFvs rule0)) $
-    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule ++ " under subst " ++ show subst) $
-    lift $ maybeToList $ unifySubst subst goal (ruleHead rule)
+    -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule ++ " under subst " ++ show subst) $
+    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
+    expandFresh $
+    maybeToList <$> unifySubstM subst goal (ruleHead rule)
 
   () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)
                  -- ++ " to get\n^====> " ++ ppr newSubst
@@ -291,7 +291,7 @@ querySubstituteJ st (v, x, z, r) = do
   let result = subst v x z
       inj = substInj :: Injection b t
 
-  newSt <- lift $ maybeToList $ runFreshMT $ unifyVarInj inj st r result
+  newSt <- expandFresh $ maybeToList <$> collapseFresh' (unifyVarInj inj st r result)
 
   let deriv = DerivationStep (inject inj result) [DerivationStep (mkSubst v x z r) []]
   pure (deriv, newSt)

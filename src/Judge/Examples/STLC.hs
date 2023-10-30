@@ -48,7 +48,7 @@ import Unbound.Generics.LocallyNameless.Unsafe
 type TypeName = Name Type
 type TermName = Name Term
 
-data Type = TyV TypeName | Bool | Unit | Arr Type Type
+data Type = TyV TypeName | TyM TypeName | Bool | Unit | Arr Type Type
   deriving (Show, Generic)
 
 data Term where
@@ -75,6 +75,7 @@ instance Ppr Term where
 
 instance Ppr Type where
   pprDoc (TyV x) = pprDoc x
+  pprDoc (TyM x) = text "?" <.> pprDoc x
   pprDoc Unit = text "Unit"
   pprDoc Bool = text "Bool"
   pprDoc (Arr x y) =
@@ -90,6 +91,7 @@ instance Alpha Term
 
 instance Subst Type Type where
   isvar (TyV x) = Just $ SubstName x
+  isvar (TyM x) = Just $ SubstName x
   isvar _ = Nothing
 
 instance Subst Term Term where
@@ -100,6 +102,7 @@ instance Subst Term Term where
 instance Plated Type where
   plate f = \case
     TyV x -> pure $ TyV x
+    TyM x -> pure $ TyM x
     Bool -> pure Bool
     Unit -> pure Unit
     Arr x y -> Arr <$> f x <*> f y
@@ -160,6 +163,10 @@ instance Subst Meta_ Meta_ where
   isvar _ = Nothing
 
 instance Subst Meta_ Type where
+  isCoerceVar (TyM x) = Just $ SubstCoerce (coerce x) go
+    where
+      go (Tp t) = Just t
+      go _ = Nothing
   isCoerceVar (TyV x) = Just $ SubstCoerce (coerce x) go
     where
       go (Tp t) = Just t
@@ -168,6 +175,10 @@ instance Subst Meta_ Type where
 
 instance Subst Meta_ Term where
   isCoerceVar (VT x) = Just $ SubstCoerce (coerce x) go
+    where
+      go (Tm t) = Just t
+      go _ = Nothing
+  isCoerceVar (MT x) = Just $ SubstCoerce (coerce x) go
     where
       go (Tm t) = Just t
       go _ = Nothing
@@ -231,6 +242,7 @@ type MetaName t = Name (Meta t)
 instance Unify Type where
   type UConst Type = TypeName
   mkVar = TyV
+  isConst (TyM x) = Just x
   isConst _ = Nothing
   getChildren = pure . children
 
@@ -240,6 +252,9 @@ instance Unify Term where
   isConst (VT x) = Just x
   isConst _ = Nothing
   getChildren (Lam bnd) = do
+    -- let (x, body) = unsafeUnbind bnd
+    -- in
+    -- pure [body]
     (x, body) <- unbind bnd
     pure [MT x, body]
   getChildren x = pure $ children x
@@ -368,6 +383,9 @@ instance IsString (Meta t) where fromString = mv
 tmV :: String -> Meta MTm
 tmV = Meta . Tm . MT . string2Name
 
+mTy :: String -> Type
+mTy = TyM . string2Name
+
 tcRules :: [Rule (Meta MJudgment)]
 tcRules = --map (toDebruijnRule . fmap L.V)
   [fact $ lookup (extend "ctx" (tmV "x") "a") (tmV "x") "a"
@@ -389,10 +407,10 @@ tcRules = --map (toDebruijnRule . fmap L.V)
   ,hasType "ctx" (tm' (App (MT $ s2n "x") (MT $ s2n "y"))) "b" -- T-App
     :-
       [hasType "ctx" (tmV "y") "a"
-      ,hasType "ctx" (tmV "x") (tp' (Arr "a" "b"))
+      ,hasType "ctx" (tmV "x") (tp' (Arr (mTy "a") (mTy "b")))
       ]
 
-  ,hasType "ctx" (tm' (lam "x" (MT $ s2n "body"))) (tp' (Arr "a" "b")) -- T-Lam
+  ,hasType "ctx" (tm' (lam "x" (MT $ s2n "body"))) (tp' (Arr (mTy "a") (mTy "b"))) -- T-Lam
     :-
       [hasType
         (extend "ctx" (tmV "x") "a")
@@ -448,8 +466,9 @@ test6 = query tcRules
       (tm (App (lam "f" (MkBool False)) (lam "x" (MkBool True))))
       (mv "a")
 
+-- TODO: This one seems to loop:
 test7 = query tcRules
   $ hasType empty
-      (tm (App (lam "f" (App "f" (MkBool False))) (lam "x" "x")))
+      (tm (App (lam "f" (App "f" (MkBool False))) (lam "y" "y")))
       (mv "a")
 
