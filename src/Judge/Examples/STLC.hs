@@ -466,7 +466,7 @@ test6 = query tcRules
       (tm (App (lam "f" (MkBool False)) (lam "x" (MkBool True))))
       (mv "a")
 
--- TODO: This one seems to loop:
+-- TODO: This one seems to loop, but it also seems to be productive:
 test7 = query tcRules
   $ hasType empty
       (tm (App (lam "f" (App "f" (MkBool False))) (lam "y" "y")))
