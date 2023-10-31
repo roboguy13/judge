@@ -288,11 +288,11 @@ instance Subst (Meta t) Type where
       go (Meta (Tp t)) = Just t
       go (Meta (MV t)) = Just $ TyM $ coerce t
       go _ = Nothing
-  -- isCoerceVar (TyM x) = Just $ SubstCoerce (coerce x) go -- TODO: Figure out what to do with this case ****
-  --   where
-  --     go (Meta (Tp t)) = Just t
-  --     go (Meta (MV t)) = Just $ TyM $ coerce t
-  --     go _ = Nothing
+  isCoerceVar (TyM x) = Just $ SubstCoerce (coerce x) go -- TODO: Figure out what to do with this case ****
+    where
+      go (Meta (Tp t)) = Just t
+      go (Meta (MV t)) = Just $ TyM $ coerce t
+      go _ = Nothing
   isCoerceVar _ = Nothing
 
 isAnyVar :: Term -> Maybe TermName
@@ -313,7 +313,7 @@ type MetaName t = Name (Meta t)
 instance Unify Type where
   type UConst Type = TypeName
   mkVar = TyV
-  isConst (TyM x) = Just x
+  isConst (TyV x) = Just x
   isConst _ = Nothing
   getChildren = pure . children
 
