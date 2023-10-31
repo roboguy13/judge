@@ -395,11 +395,29 @@ ctxVarInj_ = Injection (Tm . VT . unCtxVar) $ \case
 
 instance Subst CtxVar Meta_
 instance Subst Type CtxVar
-instance Subst Term CtxVar
 instance Subst CtxVar Type
 instance Subst CtxVar Term
-instance Subst (Meta t) CtxVar
-instance Subst Meta_ CtxVar
+
+instance Subst (Meta t) CtxVar where
+  isCoerceVar (CtxVar v) = Just $ SubstCoerce (coerce v) $ \case
+    Meta (MV v) -> Just $ CtxVar $ coerce v
+    Meta (Tm (VT v)) -> Just $ CtxVar v
+    Meta (Tm (MT v)) -> Just $ CtxVar v
+    _ -> Nothing
+
+
+instance Subst Term CtxVar where
+  isCoerceVar (CtxVar v) = Just $ SubstCoerce v $ \case
+    VT v -> Just $ CtxVar v
+    MT v -> Just $ CtxVar v
+    _ -> Nothing
+
+instance Subst Meta_ CtxVar where
+  isCoerceVar (CtxVar v) = Just $ SubstCoerce (coerce v) $ \case
+    MV v -> Just $ CtxVar $ coerce v
+    Tm (VT v) -> Just $ CtxVar v
+    Tm (MT v) -> Just $ CtxVar v
+    _ -> Nothing
 
 instance Alpha CtxVar
 
