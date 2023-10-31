@@ -547,7 +547,7 @@ tcRules = --map (toDebruijnRule . fmap L.V)
       ([hasType
         (extend "ctx" (s2n "x") "a")
         (tmV "body")
-        "b"
+        (tp $ mTy "b")
        ]
       ,[ValidCtx $ MV $ s2n "ctx"]
       )
