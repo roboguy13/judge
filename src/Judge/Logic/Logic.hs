@@ -61,8 +61,8 @@ class (Unify b, Alpha (Side a), Subst a (Side a), Show (Side a), Subst b b, Plat
   -- | Side conditions
   type family Side a
 
-  getSideVar :: Side a -> Name b
-  testSideCondition :: Side a -> a -> Bool
+  -- getSideVar :: Side a -> Name b
+  testSideCondition :: Substitution a -> Side a -> Bool
   -- renderSideCondition :: Side a -> Doc
 
 data Rule t =
@@ -243,6 +243,9 @@ queryRegularJudgment :: (QueryC t, Judgment t b) =>
 queryRegularJudgment subst rule rules goal = do
   -- rule <- freshenRule rule0
 
+  checkSideConditions subst rule
+
+
   newSubst <-
     -- trace ("rule fvs = " ++ show (ruleFvs rule0)) $
     -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule ++ " under subst " ++ show subst) $
@@ -253,8 +256,6 @@ queryRegularJudgment subst rule rules goal = do
   () <- traceM ("*** unified " ++ ppr goal ++ " and " ++ ppr (ruleHead rule)
                  -- ++ " to get\n^====> " ++ ppr newSubst
                )
-
-  checkSideConditions newSubst rule
 
   case map (applySubstRec newSubst) (ruleBody rule) of
     [] -> pure (DerivationStep goal [], newSubst)
@@ -267,7 +268,7 @@ checkSideConditions :: forall a b. (Ppr a, Unify a, Judgment a b) => Substitutio
 checkSideConditions subst rule =
   let sides = ruleSideConditions rule
   in
-  traverse_ (\s -> guard $ testSideCondition s $ applySubstRec subst $ inject substInj $ mkVar $ getSideVar @a s) sides
+  traverse_ (guard . testSideCondition subst) sides
 
 querySubst :: (QueryC t, Judgment t b) =>
   Substitution t -> Rule t -> [Rule t] -> t -> FreshMT [] (Derivation t, Substitution t)

@@ -43,6 +43,8 @@ import Control.Lens.Plated
 import Unbound.Generics.LocallyNameless
 import Unbound.Generics.LocallyNameless.Unsafe
 
+import Debug.Trace
+
 -- (Meta {unMeta = HasType (Extend Empty (Tm (VT (Obj "x"))) (Tp Unit)) (Tm (VT (Obj "x"))) (MV (Left (Name (V "a") 25)))}) [DerivationStep (Meta {unMeta = Lookup (Extend Empty (Tm (VT (Obj "x"))) (Tp Unit)) (Tm (VT (Obj "x"))) (Tp Unit)}) []]]]
 
 type TypeName = Name Type
@@ -131,25 +133,76 @@ data Meta_ where
   deriving (Show, Generic)
 
 data SideCond where
-  IsVar :: TermName -> SideCond
-  deriving (Show, Generic)
+  IsVar :: Term -> SideCond
+  ValidCtx :: Meta_ -> SideCond
+  -- deriving (Show, Generic)
+
+deriving instance Show SideCond
+deriving instance Generic SideCond
 
 instance Ppr SideCond where pprDoc = text . show
 instance Ppr [SideCond] where pprDoc = text . show
 
 instance Alpha SideCond
 
-instance Subst (Meta t) SideCond
+instance Subst (Meta t) SideCond where
+  isCoerceVar (IsVar x) = do
+    SubstCoerce y f <- isCoerceVar @(Meta t) x
+    pure $ SubstCoerce y (fmap IsVar . f)
+  isCoerceVar (ValidCtx x) = do
+    SubstCoerce y f <- isCoerceVar @(Meta t) x
+    pure $ SubstCoerce y (fmap ValidCtx . f)
+  isCoerceVar _ = Nothing
 
-instance Judgment (Meta t) Term where
+instance Subst Meta_ SideCond where
+  isCoerceVar (IsVar x) = do
+    SubstCoerce y f <- isCoerceVar @Meta_ x
+    pure $ SubstCoerce y (fmap IsVar . f)
+  isCoerceVar (ValidCtx x) = do
+    SubstCoerce y f <- isCoerceVar @Meta_ x
+    pure $ SubstCoerce y (fmap ValidCtx . f)
+  isCoerceVar _ = Nothing
+
+instance forall k (t :: k). (Typeable k, Typeable t) => Judgment (Meta t) Term where
   type Side (Meta t) = SideCond
   isSubst _ = Nothing
 
   substInj = metaInj1 . tmInj_
 
-  getSideVar (IsVar x) = x
-  testSideCondition (IsVar _) (Meta (Tm (VT _))) = True
-  testSideCondition (IsVar _) _ = False
+  -- getSideVar (IsVar x) = x
+  -- getSideVar (ValidCtx x) = coerce x :: _
+  -- getSideVar
+
+
+  testSideCondition s (IsVar v) =
+    case applySubstRec s (inject substInj v) of
+      Meta (Tm (VT _)) -> True -- TODO: Figure out why this isn't being reached in the examples
+      -- Meta (MV _) -> True
+      x -> False --error $ show x
+  testSideCondition s (ValidCtx x) =
+    let ctx = unMeta $ applySubstRec s (Meta x)
+    in
+    if isValidCtx ctx
+      then trace ("Valid ctx " ++ show ctx) True
+      else False
+
+isValidCtx :: Meta_ -> Bool
+isValidCtx Empty = True
+isValidCtx (Extend ctx v a) =
+  isValidCtx ctx && isVar v && isType a
+isValidCtx (MV _) = True
+isValidCtx _ = False
+
+isType :: Meta_ -> Bool
+isType (Tp _) = True
+isType (MV _) = True
+isType _ = False
+
+isVar :: Meta_ -> Bool
+isVar (Tm (VT _)) = True
+-- isVar (MV _) = True
+isVar _ = False
+
 
 instance FV (Meta t) where
   getInjections _ =
@@ -388,35 +441,51 @@ mTy = TyM . string2Name
 
 tcRules :: [Rule (Meta MJudgment)]
 tcRules = --map (toDebruijnRule . fmap L.V)
-  [fact $ lookup (extend "ctx" (tmV "x") "a") (tmV "x") "a"
+  [lookup (extend "ctx" (tmV "x") "a") (tmV "x") "a"
+    :-!
+      ([]
+      ,[ValidCtx $ MV $ s2n "ctx"]
+      )
   ,lookup (extend "ctx" (tmV "x") "a") (tmV "y") "b"
-    :-
-      [lookup "ctx" (tmV "y") "b"]
+    :-!
+      ([lookup "ctx" (tmV "y") "b"]
+      ,[ValidCtx $ MV $ s2n "ctx"]
+      )
 
   ,hasType "ctx" (tmV "x") "a" -- T-Var
     :-!
       ([lookup "ctx" (tmV "x") "a"]
-      ,[]
-      -- ,[IsVar $ s2n "x"]
+      -- ,[]
+      ,[IsVar $ MT $ s2n "x"
+       ,ValidCtx $ MV $ s2n "ctx"
+       ]
       )
 
 
-  ,fact $ hasType -- T-Unit
-            "ctx" (tm' MkUnit) (tp' Unit)
+  ,hasType -- T-Unit
+     "ctx" (tm' MkUnit) (tp' Unit)
+     :-!
+      ([]
+      ,[ValidCtx $ MV $ s2n "ctx"]
+      )
 
   ,hasType "ctx" (tm' (App (MT $ s2n "x") (MT $ s2n "y"))) "b" -- T-App
-    :-
-      [hasType "ctx" (tmV "y") "a"
-      ,hasType "ctx" (tmV "x") (tp' (Arr (mTy "a") (mTy "b")))
-      ]
+    :-!
+      ([hasType "ctx" (tmV "y") "a"
+       ,hasType "ctx" (tmV "x") (tp' (Arr (mTy "a") (mTy "b")))
+       ]
+      ,[ValidCtx $ MV $ s2n "ctx"]
+      )
 
   ,hasType "ctx" (tm' (lam "x" (MT $ s2n "body"))) (tp' (Arr (mTy "a") (mTy "b"))) -- T-Lam
-    :-
-      [hasType
+    :-!
+      ([hasType
         (extend "ctx" (tmV "x") "a")
         (tmV "body")
         "b"
-      ]
+       ]
+      ,[ValidCtx $ MV $ s2n "ctx"]
+      )
 
   ,fact $ hasType "ctx" (tm' (MkBool False)) (tp' Bool)
   ,fact $ hasType "ctx" (tm' (MkBool True)) (tp' Bool)
