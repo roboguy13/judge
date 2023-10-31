@@ -243,13 +243,14 @@ queryRegularJudgment :: (QueryC t, Judgment t b) =>
 queryRegularJudgment subst rule rules goal = do
   -- rule <- freshenRule rule0
 
+  () <- traceM ("trying " ++ ppr goal ++ " with rule " ++ ppr rule)
+  -- () <- traceM $ "Checking side conditions for " ++ ppr rule
   checkSideConditions subst rule
 
 
   newSubst <-
     -- trace ("rule fvs = " ++ show (ruleFvs rule0)) $
     -- trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule ++ " under subst " ++ show subst) $
-    trace ("trying " ++ ppr goal ++ " with rule " ++ ppr rule) $
     expandFresh $
     maybeToList <$> unifySubstM subst goal (ruleHead rule)
 

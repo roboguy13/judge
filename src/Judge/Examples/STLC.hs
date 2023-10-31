@@ -121,13 +121,25 @@ instance Plated Term where
     MkUnit -> pure MkUnit
     MkBool b -> pure $ MkBool b
 
+-- type CtxName = Name Ctx
+-- data Ctx where
+--   CV :: CtxName -> Ctx
+--   CM :: CtxName -> Ctx
+
+newtype CtxVar = CtxVar TermName
+  deriving (Show, Ppr, Generic)
+
+unCtxVar :: CtxVar -> TermName
+unCtxVar (CtxVar v) = v
+
 data Meta_ where
   MV :: Name Meta_ -> Meta_
-  Lookup :: Meta_ -> Meta_ -> Meta_ -> Meta_
+  Lookup :: Meta_ -> CtxVar -> Meta_ -> Meta_
   HasType :: Meta_ -> Meta_ -> Meta_ -> Meta_
 
   Empty :: Meta_
-  Extend :: Meta_ -> Meta_ -> Meta_ -> Meta_
+  Extend :: Meta_ -> CtxVar -> Meta_ -> Meta_
+
   Tp :: Type -> Meta_
   Tm :: Term -> Meta_
   deriving (Show, Generic)
@@ -189,7 +201,7 @@ instance forall k (t :: k). (Typeable k, Typeable t) => Judgment (Meta t) Term w
 isValidCtx :: Meta_ -> Bool
 isValidCtx Empty = True
 isValidCtx (Extend ctx v a) =
-  isValidCtx ctx && isVar v && isType a
+  isValidCtx ctx && isType a
 isValidCtx (MV _) = True
 isValidCtx _ = False
 
@@ -240,10 +252,10 @@ instance Subst Meta_ Term where
 instance Plated Meta_ where
   plate f = \case
     MV x -> pure $ MV x
-    Lookup x y z -> Lookup <$> f x <*> f y <*> f z
-    HasType x y z -> HasType <$> f x <*> f y <*> f z
+    Lookup x y z -> Lookup <$> f x <*> pure y <*> f z
+    HasType x y z -> HasType <$> f x <*> pure y <*> f z
     Empty -> pure Empty
-    Extend x y z -> Extend <$> f x <*> f y <*> f z
+    Extend x y z -> Extend <$> f x <*> pure y <*> f z
     Tp ty -> pure $ Tp ty
     Tm x -> pure $ Tm x
 
@@ -376,6 +388,35 @@ tmInj_ = Injection Tm $ \case
   Tm x -> Just x
   _ -> Nothing
 
+ctxVarInj_ :: Injection CtxVar Meta_
+ctxVarInj_ = Injection (Tm . VT . unCtxVar) $ \case
+  Tm (VT x) -> Just $ CtxVar x
+  _ -> Nothing
+
+instance Subst CtxVar Meta_
+instance Subst Type CtxVar
+instance Subst Term CtxVar
+instance Subst CtxVar Type
+instance Subst CtxVar Term
+instance Subst (Meta t) CtxVar
+instance Subst Meta_ CtxVar
+
+instance Alpha CtxVar
+
+instance Subst CtxVar CtxVar where
+  -- isCoerceVar (CtxVar v) = Just $ SubstCoerce v undefined
+
+instance Plated CtxVar where
+  plate _ = pure
+
+instance Unify CtxVar where
+  type UConst CtxVar = Void
+  -- mkVar = CtxVar
+
+  isConst _ = Nothing
+  getChildren _ = pure []
+  matchOne _ _ = pure Nothing
+
 instance Unify Meta_ where
   type UConst Meta_ = Void
   mkVar = MV
@@ -388,13 +429,13 @@ instance Unify Meta_ where
 
   matchOne (MV {}) (MV {}) = pure Nothing
   matchOne (Lookup x y z) (Lookup x' y' z') =
-    pure $ Just [UnifyPair id x x', UnifyPair id y y', UnifyPair id z z']
+    pure $ Just [UnifyPair id x x', UnifyPair ctxVarInj_ y y', UnifyPair id z z']
   matchOne (HasType x y z) (HasType x' y' z') =
     pure $ Just [UnifyPair id x x', UnifyPair id y y', UnifyPair id z z']
 
   matchOne Empty Empty = pure $ Just []
   matchOne (Extend x y z) (Extend x' y' z') =
-    pure $ Just [UnifyPair id x x', UnifyPair id y y', UnifyPair id z z']
+    pure $ Just [UnifyPair id x x', UnifyPair ctxVarInj_ y y', UnifyPair id z z']
 
   matchOne (Tm x) (Tm y) =
     pure $ Just [UnifyPair tmInj_ x y]
@@ -417,11 +458,11 @@ mv = Meta . MV . string2Name
 empty :: Meta MCtx
 empty = coerce Empty
 
-extend :: Meta MCtx -> Meta MTm -> Meta MTp -> Meta MCtx
-extend (Meta ctx) (Meta x) (Meta a) = Meta $ Extend ctx x a
+extend :: Meta MCtx -> TermName -> Meta MTp -> Meta MCtx
+extend (Meta ctx) x (Meta a) = Meta $ Extend ctx (CtxVar x) a
 
-lookup :: Meta MCtx -> Meta MTm -> Meta MTp -> Meta MJudgment
-lookup (Meta ctx) (Meta x) (Meta a) = Meta $ Lookup ctx x a
+lookup :: Meta MCtx -> TermName -> Meta MTp -> Meta MJudgment
+lookup (Meta ctx) x (Meta a) = Meta $ Lookup ctx (CtxVar x) a
 
 hasType :: Meta MCtx -> Meta MTm -> Meta MTp -> Meta MJudgment
 hasType (Meta ctx) (Meta x) (Meta a) = Meta $ HasType ctx x a
@@ -441,20 +482,20 @@ mTy = TyM . string2Name
 
 tcRules :: [Rule (Meta MJudgment)]
 tcRules = --map (toDebruijnRule . fmap L.V)
-  [lookup (extend "ctx" (tmV "x") "a") (tmV "x") "a"
+  [lookup (extend "ctx" (s2n "x") "a") (s2n "x") "a"
     :-!
       ([]
       ,[ValidCtx $ MV $ s2n "ctx"]
       )
-  ,lookup (extend "ctx" (tmV "x") "a") (tmV "y") "b"
+  ,lookup (extend "ctx" (s2n "x") "a") (s2n "y") "b"
     :-!
-      ([lookup "ctx" (tmV "y") "b"]
+      ([lookup "ctx" (s2n "y") "b"]
       ,[ValidCtx $ MV $ s2n "ctx"]
       )
 
   ,hasType "ctx" (tmV "x") "a" -- T-Var
     :-!
-      ([lookup "ctx" (tmV "x") "a"]
+      ([lookup "ctx" (s2n "x") "a"]
       -- ,[]
       ,[IsVar $ MT $ s2n "x"
        ,ValidCtx $ MV $ s2n "ctx"
@@ -480,7 +521,7 @@ tcRules = --map (toDebruijnRule . fmap L.V)
   ,hasType "ctx" (tm' (lam "x" (MT $ s2n "body"))) (tp' (Arr (mTy "a") (mTy "b"))) -- T-Lam
     :-!
       ([hasType
-        (extend "ctx" (tmV "x") "a")
+        (extend "ctx" (s2n "x") "a")
         (tmV "body")
         "b"
        ]
