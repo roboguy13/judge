@@ -286,7 +286,13 @@ instance Subst (Meta t) Type where
   isCoerceVar (TyV x) = Just $ SubstCoerce (coerce x) go
     where
       go (Meta (Tp t)) = Just t
+      go (Meta (MV t)) = Just $ TyM $ coerce t
       go _ = Nothing
+  -- isCoerceVar (TyM x) = Just $ SubstCoerce (coerce x) go -- TODO: Figure out what to do with this case ****
+  --   where
+  --     go (Meta (Tp t)) = Just t
+  --     go (Meta (MV t)) = Just $ TyM $ coerce t
+  --     go _ = Nothing
   isCoerceVar _ = Nothing
 
 isAnyVar :: Term -> Maybe TermName
