@@ -600,3 +600,7 @@ test7 = query tcRules
       (tm (App (lam "f" (App "f" (MkBool False))) (lam "y" "y")))
       (mv "a")
 
+test8 = query tcRules
+  $ hasType empty
+      (tm (App (lam "f" (MkBool False)) (lam "x" "x")))
+      (mv "a")
